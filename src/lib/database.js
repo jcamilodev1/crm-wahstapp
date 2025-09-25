@@ -93,11 +93,45 @@ const deleteOldMessages = db.prepare(`
   )
 `);
 
+// Normalization helpers to ensure only allowed types are passed to better-sqlite3
+function normalizeValue(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'bigint') return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (typeof value === 'object') {
+    try { return JSON.stringify(value); } catch (e) { return String(value); }
+  }
+  return String(value);
+}
+
+function normalizeArray(arr) {
+  return arr.map(normalizeValue);
+}
+
+// Wrap statements so callers can keep using .run(...) but values are normalized
+const insertContactWrapped = {
+  run: (...args) => insertContact.run(...normalizeArray(args))
+};
+
+const insertChatWrapped = {
+  run: (...args) => insertChat.run(...normalizeArray(args))
+};
+
+const insertMessageWrapped = {
+  run: (...args) => insertMessage.run(...normalizeArray(args))
+};
+
+const deleteOldMessagesWrapped = {
+  run: (...args) => deleteOldMessages.run(...normalizeArray(args))
+};
+
 module.exports = {
-  insertContact,
-  insertChat,
-  insertMessage,
-  deleteOldMessages,
+  insertContact: insertContactWrapped,
+  insertChat: insertChatWrapped,
+  insertMessage: insertMessageWrapped,
+  deleteOldMessages: deleteOldMessagesWrapped,
   getContacts,
   getChats,
   getMessages,

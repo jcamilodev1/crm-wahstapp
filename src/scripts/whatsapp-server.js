@@ -4,6 +4,23 @@ const { Server } = require('socket.io');
 const http = require('http');
 const { insertContact, insertChat, insertMessage, deleteOldMessages, getContacts, getChats, getMessages } = require('../lib/database');
 
+// Normalize values before binding to SQLite
+function normalize(value) {
+  if (value === undefined) return null;
+  if (value === null) return null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (typeof value === 'number' || typeof value === 'string' || typeof value === 'bigint') return value;
+  if (Buffer.isBuffer(value)) return value;
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value);
+    } catch (e) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
 const server = http.createServer();
 const io = new Server(server, {
   cors: {
@@ -40,18 +57,18 @@ client.on('message', (message) => {
   console.log('New message:', message.body);
   // Guardar mensaje
   insertMessage.run(
-    message.id.id,
-    message.chat.id,
-    message.body,
-    message.from,
-    message.to || message.to === undefined ? message.to : null,
-    message.timestamp,
-    message.type,
-    message.isForwarded,
-    message.isStatus,
-    message.isStarred,
-    message.fromMe,
-    message.hasMedia
+    normalize(message && message.id && message.id.id ? message.id.id : null),
+    normalize(message && message.chat && message.chat.id ? message.chat.id : null),
+    normalize(message.body),
+    normalize(message.from),
+    normalize(message.to),
+    normalize(message.timestamp),
+    normalize(message.type),
+    normalize(message.isForwarded),
+    normalize(message.isStatus),
+    normalize(message.isStarred),
+    normalize(message.fromMe),
+    normalize(message.hasMedia)
   );
   // Limpiar mensajes antiguos si > 500
   deleteOldMessages.run(message.chat.id, message.chat.id);
@@ -73,17 +90,17 @@ async function saveInitialData() {
     const contacts = await client.getContacts();
     contacts.forEach(contact => {
       insertContact.run(
-        contact.id._serialized,
-        contact.name,
-        contact.number,
-        contact.isBusiness,
-        contact.isEnterprise,
-        contact.isMe,
-        contact.isUser,
-        contact.isGroup,
-        contact.isWAContact,
-        contact.isMyContact,
-        contact.isBlocked
+        (contact && contact.id && contact.id._serialized) ? contact.id._serialized : null,
+        normalize(contact.name),
+        normalize(contact.number),
+        normalize(contact.isBusiness),
+        normalize(contact.isEnterprise),
+        normalize(contact.isMe),
+        normalize(contact.isUser),
+        normalize(contact.isGroup),
+        normalize(contact.isWAContact),
+        normalize(contact.isMyContact),
+        normalize(contact.isBlocked)
       );
     });
     console.log('Contacts saved');
@@ -91,14 +108,14 @@ async function saveInitialData() {
     const chats = await client.getChats();
     chats.forEach(chat => {
       insertChat.run(
-        chat.id._serialized,
-        chat.name,
-        chat.isGroup,
-        chat.isReadOnly,
-        chat.unreadCount,
-        chat.timestamp,
-        chat.archived,
-        chat.pinned
+        (chat && chat.id && chat.id._serialized) ? chat.id._serialized : null,
+        normalize(chat.name),
+        normalize(chat.isGroup),
+        normalize(chat.isReadOnly),
+        normalize(chat.unreadCount),
+        normalize(chat.timestamp),
+        normalize(chat.archived),
+        normalize(chat.pinned)
       );
     });
     console.log('Chats saved');
@@ -158,18 +175,18 @@ io.on('connection', (socket) => {
       const sentMessage = await chat.sendMessage(message);
       // Guardar mensaje enviado
       insertMessage.run(
-        sentMessage.id.id,
-        chatId,
-        message,
-        'me',
-        chatId,
-        sentMessage.timestamp,
-        sentMessage.type,
-        false,
-        false,
-        false,
-        true,
-        false
+        normalize(sentMessage && sentMessage.id && sentMessage.id.id ? sentMessage.id.id : null),
+        normalize(chatId),
+        normalize(message),
+        normalize('me'),
+        normalize(chatId),
+        normalize(sentMessage && sentMessage.timestamp ? sentMessage.timestamp : null),
+        normalize(sentMessage && sentMessage.type ? sentMessage.type : null),
+        normalize(false),
+        normalize(false),
+        normalize(false),
+        normalize(true),
+        normalize(false)
       );
       // Limpiar mensajes antiguos
       deleteOldMessages.run(chatId, chatId);
