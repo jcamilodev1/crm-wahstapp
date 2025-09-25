@@ -41,10 +41,10 @@ client.on('message', (message) => {
   // Guardar mensaje
   insertMessage.run(
     message.id.id,
-    message.from,
+    message.chat.id,
     message.body,
     message.from,
-    message.to,
+    message.to || message.to === undefined ? message.to : null,
     message.timestamp,
     message.type,
     message.isForwarded,
@@ -54,10 +54,10 @@ client.on('message', (message) => {
     message.hasMedia
   );
   // Limpiar mensajes antiguos si > 500
-  deleteOldMessages.run(message.from, message.from);
+  deleteOldMessages.run(message.chat.id, message.chat.id);
   // Emit new message to frontend
   io.emit('new_message', {
-    chatId: message.from,
+    chatId: message.chat.id,
     message: {
       id: message.id.id,
       body: message.body,

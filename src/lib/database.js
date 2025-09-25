@@ -1,7 +1,16 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 
-const dbPath = path.join(__dirname, '../../data/whatsapp.db');
+// Use process.cwd() so the path resolves reliably whether the code
+// is executed from the project root or from a build output folder.
+const dataDir = path.join(process.cwd(), 'data');
+// Ensure the data directory exists to avoid better-sqlite3 "directory does not exist" errors
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
+const dbPath = path.join(dataDir, 'whatsapp.db');
 const db = new Database(dbPath);
 
 // Crear tablas
@@ -37,8 +46,8 @@ db.exec(`
     id TEXT PRIMARY KEY,
     chatId TEXT,
     body TEXT,
-    from TEXT,
-    to TEXT,
+    sender TEXT,
+    recipient TEXT,
     timestamp INTEGER,
     type TEXT,
     isForwarded BOOLEAN,
@@ -67,7 +76,7 @@ const insertChat = db.prepare(`
 `);
 
 const insertMessage = db.prepare(`
-  INSERT OR REPLACE INTO messages (id, chatId, body, from, to, timestamp, type, isForwarded, isStatus, isStarred, fromMe, hasMedia)
+  INSERT OR REPLACE INTO messages (id, chatId, body, sender, recipient, timestamp, type, isForwarded, isStatus, isStarred, fromMe, hasMedia)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
