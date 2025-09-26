@@ -8,13 +8,24 @@ export default function Home() {
   const [ready, setReady] = useState(false);
   const [contacts, setContacts] = useState<any[]>([]);
   const [chats, setChats] = useState<any[]>([]);
+  const [hasMoreChats, setHasMoreChats] = useState(true);
+  const [loadingMoreChats, setLoadingMoreChats] = useState(false);
+  const chatsContainerRef = useRef<HTMLDivElement | null>(null);
+  const isFetchingChatsRef = useRef(false);
+  const chatsSentinelRef = useRef<HTMLLIElement | null>(null);
+  const chatsScrollDebounceRef = useRef<number | null>(null);
   const [selectedChat, setSelectedChat] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [chatPage, setChatPage] = useState(1);
   const [messagePage, setMessagePage] = useState(1);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadingMoreMessages, setLoadingMoreMessages] = useState(false);
   const [messageInput, setMessageInput] = useState('');
   const socketRefOuter = useRef<any | null>(null);
   const selectedChatRef = useRef<any | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const prevScrollHeightRef = useRef<number>(0);
+  const isFetchingRef = useRef(false);
   const [syncingChatId, setSyncingChatId] = useState<string | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
 
@@ -54,22 +65,89 @@ export default function Home() {
     });
 
     socket.on('chats', (data: any) => {
-      console.log('Chats received:', data);
-      setChats(data.chats);
+      try {
+        console.log('Chats received:', data);
+        const page = Number(data.page || 1);
+        const limit = Number(data.limit || (data.chats && data.chats.length) || 10);
+        const chunk: any[] = Array.isArray(data.chats) ? data.chats : [];
+        console.log(`chats handler page=${page} chunk=${chunk.length} limit=${limit}`);
+
+        if (page <= 1) {
+          setChats(chunk);
+          setHasMoreChats(chunk.length === limit);
+          // scroll to top of chats container (keep at top by default)
+          setTimeout(() => {
+            const el = chatsContainerRef.current;
+            if (el) el.scrollTop = 0;
+          }, 0);
+        } else {
+          // append older pages to the end of the list, avoiding duplicates
+          setChats(prev => {
+            const existingIds = new Set(prev.map((c: any) => (c?.id?._serialized ?? c?.id)));
+            const toAppend = chunk.filter(c => !existingIds.has(c?.id?._serialized ?? c?.id));
+            return [...prev, ...toAppend];
+          });
+          setHasMoreChats(chunk.length === limit);
+          setLoadingMoreChats(false);
+          isFetchingChatsRef.current = false;
+        }
+      } catch (err) {
+        console.warn('Error handling chats event', err);
+        setLoadingMoreChats(false);
+        isFetchingChatsRef.current = false;
+      }
     });
 
     socket.on('messages', (data: any) => {
-      console.log('Messages received:', data);
-      // Attach mediaUrl for messages that have saved mediaFilename in DB
-      const msgs = (data.messages || []).map((m: any) => {
-        try {
-          if (!m.mediaUrl && m.mediaFilename && m.chatId) {
-            m.mediaUrl = `http://localhost:3001/media/${encodeURIComponent(m.chatId)}/${encodeURIComponent(m.mediaFilename)}`;
-          }
-        } catch (e) { /* ignore */ }
-        return m;
-      });
-      setMessages(msgs);
+      try {
+        console.log('Messages received:', data);
+        const chunk: any[] = (data.messages || []).map((m: any) => {
+          try {
+            if (!m.mediaUrl && m.mediaFilename && m.chatId) {
+              m.mediaUrl = `http://localhost:3001/media/${encodeURIComponent(m.chatId)}/${encodeURIComponent(m.mediaFilename)}`;
+            }
+          } catch (e) { /* ignore */ }
+          return m;
+        });
+
+        const page = Number(data.page || 1);
+        const limit = Number(data.limit || (chunk.length || 20));
+
+        // Server returns messages ordered DESC (newest first). For UI we want oldest -> newest.
+        const ordered = chunk.slice().reverse();
+
+        if (page <= 1) {
+          // initial load / reset: replace and scroll to bottom
+          setMessages(ordered);
+          setHasMoreMessages(chunk.length === limit);
+          // small timeout to allow DOM to render then scroll to bottom
+          setTimeout(() => {
+            const el = messagesContainerRef.current;
+            if (el) el.scrollTop = el.scrollHeight;
+          }, 0);
+        } else {
+          // loading older messages: prepend and preserve scroll position
+          setMessages(prev => {
+            // avoid duplicate ids
+            const existingIds = new Set(prev.map((m: any) => m.id));
+            const toPrepend = ordered.filter(m => !existingIds.has(m.id));
+            return [...toPrepend, ...prev];
+          });
+          setHasMoreMessages(chunk.length === limit);
+          // adjust scroll after render in next tick
+          setTimeout(() => {
+            const el = messagesContainerRef.current;
+            if (el) {
+              // preserve viewport roughly: add the delta height
+              el.scrollTop = (el.scrollTop || 0) + (el.scrollHeight - (prevScrollHeightRef.current || 0));
+            }
+            setLoadingMoreMessages(false);
+            isFetchingRef.current = false;
+          }, 0);
+        }
+      } catch (err) {
+        console.warn('Error handling messages event', err);
+      }
     });
 
     socket.on('new_message', (data: any) => {
@@ -149,6 +227,10 @@ export default function Home() {
   const handleChatClick = async (chat: any) => {
     setSelectedChat(chat);
     selectedChatRef.current = chat;
+    // reset messages pagination/state for the newly selected chat
+    setMessages([]);
+    setMessagePage(1);
+    setHasMoreMessages(true);
   // reset unread count for this chat in UI
   const chatId = chat?.id?._serialized ?? chat?.id;
   setChats(prev => prev.map(c => ((c?.id?._serialized ?? c?.id) === chatId) ? { ...c, unreadCount: 0 } : c));
@@ -183,7 +265,7 @@ export default function Home() {
       setSyncError(String(err));
     } finally {
       // Request messages via socket (will return whatever is in the DB)
-      socketRefOuter.current?.emit('get_messages', { chatId, page: messagePage, limit: 20 });
+      socketRefOuter.current?.emit('get_messages', { chatId, page: 1, limit: 20 });
       setSyncingChatId(null);
     }
   };
@@ -213,14 +295,84 @@ export default function Home() {
   };
 
   const loadMoreChats = () => {
-    setChatPage(prev => prev + 1);
-    socketRefOuter.current?.emit('get_chats', { page: chatPage + 1, limit: 10 });
+    console.log('loadMoreChats called', { isFetching: isFetchingChatsRef.current, hasMoreChats, chatPage });
+    if (isFetchingChatsRef.current || !hasMoreChats) {
+      console.log('loadMoreChats aborted (fetching or no more)');
+      return;
+    }
+    // Use functional update to avoid stale closure
+    setChatPage(prev => {
+      const next = prev + 1;
+      console.log('loadMoreChats -> requesting page', next);
+      isFetchingChatsRef.current = true;
+      setLoadingMoreChats(true);
+      socketRefOuter.current?.emit('get_chats', { page: next, limit: 10 });
+      return next;
+    });
   };
 
   const loadMoreMessages = () => {
-    setMessagePage(prev => prev + 1);
-    socketRefOuter.current?.emit('get_messages', { chatId: selectedChat.id._serialized, page: messagePage + 1, limit: 20 });
+    if (!selectedChat || isFetchingRef.current || !hasMoreMessages) return;
+    const next = messagePage + 1;
+    // mark fetching and record previous scrollHeight to preserve viewport
+    isFetchingRef.current = true;
+    setLoadingMoreMessages(true);
+    prevScrollHeightRef.current = messagesContainerRef.current ? messagesContainerRef.current.scrollHeight : 0;
+    setMessagePage(next);
+    socketRefOuter.current?.emit('get_messages', { chatId: selectedChat.id._serialized, page: next, limit: 20 });
   };
+
+  // Attach scroll listener to messages container to implement infinite scroll when near top
+  useEffect(() => {
+    const el = messagesContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      // if user scrolled near top (20% from top) request older messages
+      if (el.scrollTop < Math.max(50, el.clientHeight * 0.2)) {
+        loadMoreMessages();
+      }
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [selectedChat, messagePage, hasMoreMessages]);
+
+  // Attach scroll listener to chats container to implement infinite scroll when near bottom
+  useEffect(() => {
+    const el = chatsContainerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      // debounce rapid scroll events
+      if (chatsScrollDebounceRef.current) window.clearTimeout(chatsScrollDebounceRef.current);
+      chatsScrollDebounceRef.current = window.setTimeout(() => {
+        // if user scrolled near bottom (80% from top) request next page of chats
+        const nearBottom = (el.scrollTop + el.clientHeight) >= (el.scrollHeight - Math.max(50, el.clientHeight * 0.2));
+        // only attempt if we have more
+        if (nearBottom && hasMoreChats) {
+          console.log('chats container near bottom -> requesting next page', { chatPage, hasMoreChats });
+          loadMoreChats();
+        }
+      }, 150);
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, [chatPage, hasMoreChats]);
+
+  // IntersectionObserver sentinel to load more chats when sentinel enters view
+  useEffect(() => {
+    const sentinel = chatsSentinelRef.current;
+    if (!sentinel) return;
+    const rootEl = chatsContainerRef.current || null;
+    const obs = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting && hasMoreChats) {
+          console.log('chats sentinel intersecting -> loadMoreChats', { chatsCount: chats.length });
+          loadMoreChats();
+        }
+      }
+    }, { root: rootEl, rootMargin: '100px', threshold: 0.1 });
+    obs.observe(sentinel);
+    return () => { obs.disconnect(); };
+  }, [hasMoreChats, chats.length]);
 
   if (qr) {
     return (
@@ -251,30 +403,34 @@ export default function Home() {
           ))}
         </ul>
         <h2 className="text-xl mb-4 mt-8">Chats</h2>
-        <ul>
-          {chats.map((chat) => (
-            <li
-              key={chat?.id?._serialized ?? chat?.id}
-              className="mb-2 cursor-pointer p-2 hover:bg-gray-200 flex justify-between items-center"
-              onClick={() => handleChatClick(chat)}
-            >
-              <span>{chat.name || chat.id.user}</span>
-              {chat.unreadCount ? (
-                <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">{chat.unreadCount}</span>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-        <button onClick={loadMoreChats} className="mt-4 bg-blue-500 text-white px-4 py-2">
-          Cargar más chats
-        </button>
+        <div ref={chatsContainerRef} className="max-h-[70vh] overflow-y-auto">
+          <ul>
+            {chats.map((chat) => (
+              <li
+                key={chat?.id?._serialized ?? chat?.id}
+                className="mb-2 cursor-pointer p-2 hover:bg-gray-200 flex justify-between items-center"
+                onClick={() => handleChatClick(chat)}
+              >
+                <span>{chat.name || chat.id.user}</span>
+                {chat.unreadCount ? (
+                  <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">{chat.unreadCount}</span>
+                ) : null}
+              </li>
+            ))}
+            {/* sentinel como último elemento de la lista para que esté en el flujo del <ul> */}
+            <li ref={chatsSentinelRef} aria-hidden className="w-full h-6" />
+          </ul>
+          {loadingMoreChats ? (
+            <div className="text-center text-sm text-gray-500 mt-2">Cargando más chats...</div>
+          ) : null}
+        </div>
       </div>
       <div className="w-2/3 p-4">
         {selectedChat ? (
           <div>
             <h2 className="text-xl mb-4">{selectedChat.name || selectedChat.id.user} {syncingChatId === (selectedChat?.id?._serialized ?? selectedChat?.id) ? '(Sincronizando...)' : ''}</h2>
             {syncError ? <p className="text-sm text-red-600">{syncError}</p> : null}
-            <div className="h-96 overflow-y-scroll border p-2">
+            <div ref={messagesContainerRef} className="h-96 overflow-y-scroll border p-2">
               {messages.map((msg) => (
                 <div key={msg.id} className="mb-2">
                   <strong>{msg.from === 'me' ? 'Yo' : msg.from}:</strong>
@@ -300,6 +456,9 @@ export default function Home() {
                   ) : null}
                 </div>
               ))}
+              {loadingMoreMessages ? (
+                <div className="text-center text-sm text-gray-500 mt-2">Cargando mensajes anteriores...</div>
+              ) : null}
             </div>
             <form onSubmit={handleSendMessage} className="mt-4 flex">
               <input
@@ -313,9 +472,7 @@ export default function Home() {
                 Enviar
               </button>
             </form>
-            <button onClick={loadMoreMessages} className="mt-4 bg-blue-500 text-white px-4 py-2">
-              Cargar más mensajes
-            </button>
+            {/* botón eliminado: ahora la carga es por scroll infinito */}
           </div>
         ) : (
           <p>Selecciona un chat para ver los mensajes</p>

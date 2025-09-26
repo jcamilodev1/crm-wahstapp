@@ -434,7 +434,7 @@ async function saveInitialData() {
             // get chat model from client
             const chatModel = await retryAsync(() => client.getChatById(chatId), 3, 1000);
             // fetch recent messages (adjust limit as needed)
-            const messages = await retryAsync(() => chatModel.fetchMessages({ limit: 200 }), 3, 1000);
+            const messages = await retryAsync(() => chatModel.fetchMessages({ limit: 50 }), 3, 1000);
             if (Array.isArray(messages) && messages.length) {
               let saved = 0;
               for (const m of messages) {
