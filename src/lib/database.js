@@ -55,6 +55,9 @@ db.exec(`
     isStarred BOOLEAN,
     fromMe BOOLEAN,
     hasMedia BOOLEAN,
+    mediaFilename TEXT,
+    mediaMime TEXT,
+    mediaSize INTEGER,
     createdAt DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (chatId) REFERENCES chats (id)
   );
@@ -63,6 +66,22 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chats_timestamp ON chats (timestamp);
   CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts (name);
 `);
+// Backwards-compatible migration: ensure media columns exist on older DBs
+try {
+  const cols = db.prepare("PRAGMA table_info('messages')").all();
+  const colNames = cols.map(c => c.name);
+  if (!colNames.includes('mediaFilename')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaFilename TEXT").run();
+  }
+  if (!colNames.includes('mediaMime')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaMime TEXT").run();
+  }
+  if (!colNames.includes('mediaSize')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaSize INTEGER").run();
+  }
+} catch (e) {
+  console.warn('DB migration check for media columns failed:', e && e.message ? e.message : e);
+}
 
 // Preparar statements
 const insertContact = db.prepare(`
@@ -76,8 +95,8 @@ const insertChat = db.prepare(`
 `);
 
 const insertMessage = db.prepare(`
-  INSERT OR REPLACE INTO messages (id, chatId, body, sender, recipient, timestamp, type, isForwarded, isStatus, isStarred, fromMe, hasMedia)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT OR REPLACE INTO messages (id, chatId, body, sender, recipient, timestamp, type, isForwarded, isStatus, isStarred, fromMe, hasMedia, mediaFilename, mediaMime, mediaSize)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const getContacts = db.prepare('SELECT * FROM contacts ORDER BY name');
@@ -137,3 +156,20 @@ module.exports = {
   getMessages,
   db
 };
+
+// Backwards-compatible migration: ensure media columns exist on older DBs
+try {
+  const cols = db.prepare("PRAGMA table_info('messages')").all();
+  const colNames = cols.map(c => c.name);
+  if (!colNames.includes('mediaFilename')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaFilename TEXT").run();
+  }
+  if (!colNames.includes('mediaMime')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaMime TEXT").run();
+  }
+  if (!colNames.includes('mediaSize')) {
+    db.prepare("ALTER TABLE messages ADD COLUMN mediaSize INTEGER").run();
+  }
+} catch (e) {
+  console.warn('DB migration check for media columns failed:', e && e.message ? e.message : e);
+}

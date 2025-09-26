@@ -1,9 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
-
-const socket = io('http://localhost:3001');
 
 export default function Home() {
   const [qr, setQr] = useState<string | null>(null);
@@ -15,11 +13,27 @@ export default function Home() {
   const [chatPage, setChatPage] = useState(1);
   const [messagePage, setMessagePage] = useState(1);
   const [messageInput, setMessageInput] = useState('');
+  const socketRefOuter = useRef<any | null>(null);
+  const selectedChatRef = useRef<any | null>(null);
+  const [syncingChatId, setSyncingChatId] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     console.log('Connecting to socket...');
+    // prefer polling first then upgrade to websocket; increase timeout to avoid early failures
+    const socket = io('http://localhost:3001', { transports: ['polling', 'websocket'], timeout: 20000, reconnectionAttempts: 5 });
+    socketRefOuter.current = socket;
+
     socket.on('connect', () => console.log('Connected to socket'));
     socket.on('disconnect', () => console.log('Disconnected from socket'));
+    socket.on('connect_error', (err: any) => {
+      console.error('Socket connect_error:', err);
+      setSyncError(`Socket connect_error: ${String(err)}`);
+    });
+    socket.on('connect_timeout', (err: any) => {
+      console.error('Socket connect_timeout:', err);
+      setSyncError(`Socket connect_timeout: ${String(err)}`);
+    });
 
     socket.on('qr', (qrUrl: string) => {
       console.log('QR received:', qrUrl);
@@ -30,8 +44,8 @@ export default function Home() {
       console.log('WhatsApp ready');
       setReady(true);
       setQr(null);
-      socket.emit('get_contacts');
-      socket.emit('get_chats', { page: chatPage, limit: 10 });
+      socketRefOuter.current?.emit('get_contacts');
+      socketRefOuter.current?.emit('get_chats', { page: chatPage, limit: 10 });
     });
 
     socket.on('contacts', (data: any[]) => {
@@ -46,13 +60,71 @@ export default function Home() {
 
     socket.on('messages', (data: any) => {
       console.log('Messages received:', data);
-      setMessages(data.messages);
+      // Attach mediaUrl for messages that have saved mediaFilename in DB
+      const msgs = (data.messages || []).map((m: any) => {
+        try {
+          if (!m.mediaUrl && m.mediaFilename && m.chatId) {
+            m.mediaUrl = `http://localhost:3001/media/${encodeURIComponent(m.chatId)}/${encodeURIComponent(m.mediaFilename)}`;
+          }
+        } catch (e) { /* ignore */ }
+        return m;
+      });
+      setMessages(msgs);
     });
 
     socket.on('new_message', (data: any) => {
       console.log('New message:', data);
-      if (selectedChat && data.chatId === selectedChat.id._serialized) {
-        setMessages(prev => [...prev, data.message]);
+      const incomingChatId = data.chatId;
+      const incomingMsg = data.message;
+
+      // helpers to normalize and compare IDs (digits-only)
+      const digitsOnly = (s: any) => {
+        if (!s && s !== 0) return '';
+        try { return String(s).replace(/\D+/g, ''); } catch (e) { return String(s); }
+      };
+      const compareIds = (a: any, b: any) => {
+        if (a === b) return true;
+        const da = digitsOnly(a);
+        const db = digitsOnly(b);
+        if (da && db && da === db) return true;
+        return false;
+      };
+
+      // Debug: log current chats and selectedChatRef
+      console.log('Before chats (ids):', chats.map(c => (c?.id?._serialized ?? c?.id)));
+      console.log('incomingChatId:', incomingChatId, 'digits:', digitsOnly(incomingChatId));
+      console.log('selectedChatRef.current id:', selectedChatRef.current && (selectedChatRef.current?.id?._serialized ?? selectedChatRef.current?.id));
+
+      // Ensure the chat appears in the list and is moved to the top
+      setChats(prev => {
+        const idOf = (c: any) => (c?.id?._serialized ?? c?.id);
+        const idx = prev.findIndex(c => compareIds(idOf(c), incomingChatId));
+        const newChats = [...prev];
+        if (idx !== -1) {
+          const existing = newChats[idx];
+          const updated = { ...existing, timestamp: incomingMsg.timestamp, lastMessage: incomingMsg.body || '' };
+          // remove existing and put updated at front
+          newChats.splice(idx, 1);
+          // increment unread if not currently selected
+          if (!(selectedChatRef.current && compareIds((selectedChatRef.current?.id?._serialized ?? selectedChatRef.current?.id), incomingChatId))) {
+            updated.unreadCount = (existing.unreadCount || 0) + 1;
+          } else {
+            updated.unreadCount = 0;
+          }
+          return [updated, ...newChats];
+        } else {
+          // chat not present: prepend a minimal chat object
+          const isSelected = selectedChatRef.current && compareIds((selectedChatRef.current?.id?._serialized ?? selectedChatRef.current?.id), incomingChatId);
+          const newChat = { id: { _serialized: incomingChatId }, name: incomingMsg.from || incomingChatId, timestamp: incomingMsg.timestamp, unreadCount: isSelected ? 0 : 1 };
+          return [newChat, ...newChats];
+        }
+      });
+
+      // If the currently open chat is the one that received the message, append it to messages
+      if (selectedChatRef.current && compareIds((selectedChatRef.current?.id?._serialized ?? selectedChatRef.current?.id), incomingChatId)) {
+        setMessages(prev => [...prev, incomingMsg]);
+        // reset unread for the chat in the list
+        setChats(prev => prev.map(c => (compareIds((c?.id?._serialized ?? c?.id), incomingChatId) ? { ...c, unreadCount: 0 } : c)));
       }
     });
 
@@ -65,12 +137,55 @@ export default function Home() {
       socket.off('chats');
       socket.off('messages');
       socket.off('new_message');
+      socket.off('connect_error');
+      socket.off('connect_timeout');
+      try { socket.disconnect(); } catch (e) { /* ignore */ }
     };
-  }, [selectedChat, chatPage, messagePage]);
+  }, []);
 
-  const handleChatClick = (chat: any) => {
+  // keep a ref in sync with selectedChat so handlers can read latest value
+  useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
+
+  const handleChatClick = async (chat: any) => {
     setSelectedChat(chat);
-    socket.emit('get_messages', { chatId: chat.id._serialized, page: messagePage, limit: 20 });
+    selectedChatRef.current = chat;
+  // reset unread count for this chat in UI
+  const chatId = chat?.id?._serialized ?? chat?.id;
+  setChats(prev => prev.map(c => ((c?.id?._serialized ?? c?.id) === chatId) ? { ...c, unreadCount: 0 } : c));
+    if (!chatId) {
+      socketRefOuter.current?.emit('get_messages', { chatId: chat.id, page: messagePage, limit: 20 });
+      return;
+    }
+
+    // First, ask the server to sync this chat (authorized request).
+    // NOTE: For local/dev you can expose NEXT_PUBLIC_SYNC_API_KEY, but do not do this in production.
+    const apiKey = process.env.NEXT_PUBLIC_SYNC_API_KEY || '';
+    try {
+      setSyncingChatId(chatId);
+      setSyncError(null);
+      const headers: any = { 'Content-Type': 'application/json' };
+      if (apiKey) headers['x-api-key'] = apiKey;
+      const resp = await fetch('http://localhost:3001/api/sync-chat', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ chatId, limit: 200 })
+      });
+      if (!resp.ok) {
+        console.warn('Sync API returned', resp.status);
+        const txt = await resp.text().catch(() => null);
+        setSyncError(`Sync failed: ${resp.status} ${txt ? '- ' + txt : ''}`);
+      } else {
+        const json = await resp.json();
+        console.log('Sync result', json);
+      }
+    } catch (err: any) {
+      console.warn('Failed to call sync API:', err);
+      setSyncError(String(err));
+    } finally {
+      // Request messages via socket (will return whatever is in the DB)
+      socketRefOuter.current?.emit('get_messages', { chatId, page: messagePage, limit: 20 });
+      setSyncingChatId(null);
+    }
   };
 
   const handleSendMessage = (e: React.FormEvent) => {
@@ -93,18 +208,18 @@ export default function Home() {
     };
     setMessages(prev => [...prev, tempMessage]);
 
-    socket.emit('send_message', messageData);
+    socketRefOuter.current?.emit('send_message', messageData);
     setMessageInput('');
   };
 
   const loadMoreChats = () => {
     setChatPage(prev => prev + 1);
-    socket.emit('get_chats', { page: chatPage + 1, limit: 10 });
+    socketRefOuter.current?.emit('get_chats', { page: chatPage + 1, limit: 10 });
   };
 
   const loadMoreMessages = () => {
     setMessagePage(prev => prev + 1);
-    socket.emit('get_messages', { chatId: selectedChat.id._serialized, page: messagePage + 1, limit: 20 });
+    socketRefOuter.current?.emit('get_messages', { chatId: selectedChat.id._serialized, page: messagePage + 1, limit: 20 });
   };
 
   if (qr) {
@@ -139,11 +254,14 @@ export default function Home() {
         <ul>
           {chats.map((chat) => (
             <li
-              key={chat.id}
-              className="mb-2 cursor-pointer p-2 hover:bg-gray-200"
+              key={chat?.id?._serialized ?? chat?.id}
+              className="mb-2 cursor-pointer p-2 hover:bg-gray-200 flex justify-between items-center"
               onClick={() => handleChatClick(chat)}
             >
-              {chat.name || chat.id.user}
+              <span>{chat.name || chat.id.user}</span>
+              {chat.unreadCount ? (
+                <span className="ml-2 bg-red-500 text-white text-xs px-2 py-1 rounded-full">{chat.unreadCount}</span>
+              ) : null}
             </li>
           ))}
         </ul>
@@ -154,11 +272,32 @@ export default function Home() {
       <div className="w-2/3 p-4">
         {selectedChat ? (
           <div>
-            <h2 className="text-xl mb-4">{selectedChat.name || selectedChat.id.user}</h2>
+            <h2 className="text-xl mb-4">{selectedChat.name || selectedChat.id.user} {syncingChatId === (selectedChat?.id?._serialized ?? selectedChat?.id) ? '(Sincronizando...)' : ''}</h2>
+            {syncError ? <p className="text-sm text-red-600">{syncError}</p> : null}
             <div className="h-96 overflow-y-scroll border p-2">
               {messages.map((msg) => (
                 <div key={msg.id} className="mb-2">
-                  <strong>{msg.from === 'me' ? 'Yo' : msg.from}:</strong> {msg.body}
+                  <strong>{msg.from === 'me' ? 'Yo' : msg.from}:</strong>
+                  {msg.body ? <span> {msg.body}</span> : null}
+                  {msg.hasMedia && msg.mediaUrl ? (
+                    msg.mediaMime && msg.mediaMime.startsWith('image/') ? (
+                      <div className="mt-2">
+                        <img src={msg.mediaUrl} alt={msg.mediaFilename || 'imagen'} className="max-h-64" />
+                      </div>
+                    ) : msg.mediaMime && msg.mediaMime.startsWith('audio/') ? (
+                      <div className="mt-2">
+                        <audio controls src={msg.mediaUrl} />
+                      </div>
+                    ) : msg.mediaMime && msg.mediaMime.startsWith('video/') ? (
+                      <div className="mt-2">
+                        <video controls src={msg.mediaUrl} className="max-h-96" />
+                      </div>
+                    ) : (
+                      <div className="mt-2">
+                        <a href={msg.mediaUrl} target="_blank" rel="noreferrer">Descargar {msg.mediaFilename || 'archivo'}</a>
+                      </div>
+                    )
+                  ) : null}
                 </div>
               ))}
             </div>
