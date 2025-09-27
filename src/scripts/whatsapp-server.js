@@ -3,9 +3,20 @@ const qrcode = require('qrcode');
 const { Server } = require('socket.io');
 const http = require('http');
 const { insertContact, insertChat, insertMessage, deleteOldMessages, getContacts, getChats, getMessages } = require('../lib/database');
+const {
+  insertReminder,
+  getDueReminders,
+  markReminderProcessing,
+  markReminderSent,
+  markReminderFailed,
+  listReminders,
+  getReminderById,
+  deleteReminder
+} = require('../lib/database');
 const fs = require('fs');
 const path = require('path');
 const mime = require('mime-types');
+const cronParser = require('cron-parser');
 
 // Normalize values before binding to SQLite
 function normalize(value) {
@@ -22,6 +33,25 @@ function normalize(value) {
     }
   }
   return String(value);
+}
+
+// Normalize a chatId that may be a string or an object coming from the frontend
+function normalizeChatIdInput(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'string') return raw;
+  if (typeof raw === 'object') {
+    // common shapes: { _serialized: '...', id: '...' } or { id: { _serialized: '...' } }
+    if (raw._serialized) return raw._serialized;
+    if (raw.id && (raw.id._serialized || typeof raw.id === 'string')) return raw.id._serialized || raw.id;
+    // sometimes frontend sends a full chat object with an `id` property that's also an object
+    try {
+      // fallback: try toString
+      return String(raw);
+    } catch (e) {
+      return null;
+    }
+  }
+  return null;
 }
 
 const server = http.createServer();
@@ -137,8 +167,9 @@ server.on('request', async (req, res) => {
       }
 
       try {
-        console.log(`Sync request received for chat ${chatId} (limit=${limit})`);
-        const chat = await client.getChatById(chatId);
+  const chatIdNormalized = normalizeChatIdInput(chatId);
+  console.log(`Sync request received for chat ${chatId} (normalized=${chatIdNormalized}) (limit=${limit})`);
+  const chat = await client.getChatById(chatIdNormalized);
         if (!chat) {
           res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'chat not found' }));
@@ -209,6 +240,86 @@ server.on('request', async (req, res) => {
       return;
     }
   }
+  // Simple reminders API: POST /api/reminders to create
+  if (req.url && req.url.startsWith('/api/reminders')) {
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': 'http://localhost:3000',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, x-api-key, Authorization',
+    };
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204, corsHeaders);
+      res.end();
+      return;
+    }
+
+    // POST /api/reminders -> crear reminder
+    if (req.method === 'POST' && req.url === '/api/reminders') {
+      try {
+        let body = '';
+        for await (const chunk of req) body += chunk;
+        const payload = body ? JSON.parse(body) : {};
+        const apiKeyHeader = req.headers['x-api-key'] || req.headers['authorization'];
+        const expected = process.env.SYNC_API_KEY;
+        if (!expected || !apiKeyHeader || String(apiKeyHeader) !== expected) {
+          res.writeHead(401, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'unauthorized' }));
+          return;
+        }
+
+        const { body: text, recipients, scheduledAt, repeatRule } = payload;
+        if (!text || !recipients || !Array.isArray(recipients) || recipients.length === 0 || !scheduledAt) {
+          res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'invalid_payload', required: ['body', 'recipients(array)', 'scheduledAt(epoch_ms)'] }));
+          return;
+        }
+
+        insertReminder.run(text, JSON.stringify(recipients), Number(scheduledAt), repeatRule || null, 'pending');
+        res.writeHead(201, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: true }));
+        return;
+      } catch (e) {
+        res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal', details: e && e.message ? e.message : String(e) }));
+        return;
+      }
+    }
+
+    // GET /api/reminders?limit=&offset=
+    if (req.method === 'GET' && req.url.startsWith('/api/reminders')) {
+      try {
+        // parse query params
+        const urlObj = new URL(req.url, `http://localhost:3001`);
+        const limit = Number(urlObj.searchParams.get('limit') || '50');
+        const offset = Number(urlObj.searchParams.get('offset') || '0');
+        const reminders = listReminders.all(limit, offset);
+        res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ reminders }));
+        return;
+      } catch (e) {
+        res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal', details: e && e.message ? e.message : String(e) }));
+        return;
+      }
+    }
+
+    // DELETE /api/reminders/:id
+    if (req.method === 'DELETE' && req.url.match(/^\/api\/reminders\/\d+$/)) {
+      try {
+        const parts = req.url.split('/');
+        const id = Number(parts[parts.length - 1]);
+        deleteReminder.run(id);
+        res.writeHead(204, corsHeaders);
+        res.end();
+        return;
+      } catch (e) {
+        res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'internal', details: e && e.message ? e.message : String(e) }));
+        return;
+      }
+    }
+  }
 });
 
 const client = new Client({
@@ -217,6 +328,83 @@ const client = new Client({
 
 let lastQr = null;
 let isReady = false;
+
+// Reminder worker: consulta recordatorios pendientes y los envía cuando llega el momento.
+let reminderWorkerHandle = null;
+async function processDueReminders(maxPerRun = 20) {
+  if (!isReady) return;
+  try {
+    const now = Date.now();
+    const due = getDueReminders.all(now, maxPerRun) || [];
+    for (const r of due) {
+          try {
+            // marcar como processing (y aumentar attempts)
+            markReminderProcessing.run(r.id);
+            // refrescar registro para conocer attempts actuales
+            const refreshed = getReminderById.get(r.id);
+            const recipients = (() => { try { return JSON.parse(r.recipients || '[]'); } catch (e) { return []; } })();
+            let allOk = true;
+            for (const to of recipients) {
+              try {
+                await client.sendMessage(String(to), r.body || '');
+              } catch (sendErr) {
+                allOk = false;
+                console.warn('Failed to send reminder', r.id, 'to', to, sendErr && sendErr.message ? sendErr.message : sendErr);
+              }
+            }
+
+            if (allOk) {
+              // If there's a repeatRule, compute next occurrence and reschedule
+              if (r.repeatRule) {
+                try {
+                  const interval = cronParser.parseExpression(r.repeatRule, { currentDate: new Date(r.scheduledAt) });
+                  const next = interval.next().getTime();
+                  // reschedule for next occurrence
+                  try {
+                    const { rescheduleReminder } = require('../lib/database');
+                    rescheduleReminder.run(next, r.id);
+                    io.emit('reminder_rescheduled', { id: r.id, next });
+                  } catch (dbErr) {
+                    // fallback: mark as sent if reschedule fails
+                    console.warn('Failed to reschedule reminder in DB', dbErr && dbErr.message ? dbErr.message : dbErr);
+                    markReminderSent.run(Date.now(), r.id);
+                    io.emit('reminder_sent', { id: r.id });
+                  }
+                } catch (cronErr) {
+                  // invalid cron expression -> mark sent and log
+                  console.warn('Invalid repeatRule for reminder', r.id, r.repeatRule, cronErr && cronErr.message ? cronErr.message : cronErr);
+                  markReminderSent.run(Date.now(), r.id);
+                  io.emit('reminder_sent', { id: r.id });
+                }
+              } else {
+                markReminderSent.run(Date.now(), r.id);
+                io.emit('reminder_sent', { id: r.id });
+              }
+            } else {
+              const attempts = refreshed && refreshed.attempts ? refreshed.attempts : 1;
+              markReminderFailed.run(String('partial_send_error'), attempts, r.id);
+              io.emit('reminder_failed', { id: r.id, error: 'partial_send_error' });
+            }
+          } catch (err) {
+            // Make sure failures are recorded
+            const refreshed = getReminderById.get(r.id);
+            const attempts = refreshed && refreshed.attempts ? refreshed.attempts : 1;
+            markReminderFailed.run(String(err && err.message ? err.message : err), attempts, r.id);
+            io.emit('reminder_failed', { id: r.id, error: err && err.message ? err.message : String(err) });
+          }
+    }
+  } catch (e) {
+    console.error('Reminder worker failed:', e && e.message ? e.message : e);
+  }
+}
+
+function startReminderWorker(pollMs = Number(process.env.REMINDER_POLL_INTERVAL_MS || 5000)) {
+  if (reminderWorkerHandle) return;
+  reminderWorkerHandle = setInterval(() => {
+    processDueReminders().catch(() => {});
+  }, pollMs);
+  console.log('Reminder worker started, poll interval:', pollMs, 'ms');
+}
 
 client.on('qr', (qr) => {
   console.log('QR RECEIVED');
@@ -252,6 +440,8 @@ client.on('ready', async () => {
     isReady = true;
     io.emit('ready');
     console.log('Initial data saved and ready emitted');
+    // Iniciar worker de recordatorios
+    try { startReminderWorker(); } catch (e) { console.warn('Failed to start reminder worker:', e && e.message ? e.message : e); }
   } catch (err) {
     console.error('Error during initial data save:', err);
     // Even if saving fails, still mark ready so UI can connect; frontend will show empty lists but we log the error
