@@ -3,6 +3,8 @@ import Image from 'next/image';
 import { Chat, Message } from '../types';
 import { Avatar, Button, Input, Spinner } from './ui';
 import { MessageStatus } from './MessageStatus';
+import { ReadStatusBadge } from './ReadStatusBadge';
+import { ChatReadStatus } from './ChatReadStatus';
 import ReminderModal from './ReminderModal';
 
 interface MessageAreaProps {
@@ -179,11 +181,14 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
             <h2 className="text-lg font-semibold text-gray-900">
               {selectedChat.name || selectedChat.id.user}
             </h2>
-            {syncError && (
-              <p className="text-sm text-red-600 mt-1">
-                Error de sincronización: {syncError}
-              </p>
-            )}
+            <div className="flex items-center space-x-3">
+              <ChatReadStatus unreadCount={selectedChat.unreadCount} />
+              {syncError && (
+                <p className="text-sm text-red-600">
+                  Error: {syncError}
+                </p>
+              )}
+            </div>
           </div>
           <Button
             onClick={() => setShowReminderModal(true)}
@@ -221,7 +226,10 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
               } ${!message.fromMe && message.isRead === false ? 'ring-2 ring-blue-200' : ''}`}>
                 {/* Indicador de mensaje no leído */}
                 {!message.fromMe && message.isRead === false && (
-                  <div className="absolute -left-2 top-2 w-2 h-2 bg-blue-500 rounded-full"></div>
+                  <div className="absolute -left-3 top-2">
+                    <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
+                    <div className="w-3 h-3 bg-red-500 rounded-full absolute top-0 animate-ping"></div>
+                  </div>
                 )}
                 {!message.fromMe && (
                   <p className="text-xs opacity-75 mb-1">
@@ -234,6 +242,15 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                 )}
                 
                 {renderMediaContent(message)}
+                
+                {/* Badge de estado de lectura */}
+                <div className="mt-2">
+                  <ReadStatusBadge 
+                    ack={message.ack} 
+                    fromMe={message.fromMe}
+                    isRead={message.isRead}
+                  />
+                </div>
                 
                 <div className={`flex items-center justify-between mt-2 ${
                   message.fromMe ? 'text-blue-100' : 'text-gray-500'

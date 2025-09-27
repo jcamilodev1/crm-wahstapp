@@ -5,4 +5,6 @@ export { MainSidebar } from './MainSidebar';
 export { ChatsSection } from './ChatsSection';
 export { RecordatoriosSection } from './RecordatoriosSection';
 export { MessageStatus } from './MessageStatus';
+export { ReadStatusBadge } from './ReadStatusBadge';
+export { ChatReadStatus } from './ChatReadStatus';
 export * from './ui';
