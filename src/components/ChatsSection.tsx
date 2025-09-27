@@ -41,6 +41,7 @@ export const ChatsSection: React.FC = () => {
         loadingMoreMessages={loadingMoreMessages}
         onLoadMoreMessages={loadMoreMessages}
         syncError={syncError}
+        chats={chats}
       />
     </div>
   );

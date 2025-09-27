@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { Chat, Message } from '../types';
 import { Avatar, Button, Input, Spinner } from './ui';
+import ReminderModal from './ReminderModal';
 
 interface MessageAreaProps {
   selectedChat: Chat | null;
@@ -11,6 +12,7 @@ interface MessageAreaProps {
   loadingMoreMessages: boolean;
   onLoadMoreMessages: () => void;
   syncError: string | null;
+  chats?: any[];
 }
 
 export const MessageArea: React.FC<MessageAreaProps> = ({
@@ -20,10 +22,12 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
   hasMoreMessages,
   loadingMoreMessages,
   onLoadMoreMessages,
-  syncError
+  syncError,
+  chats = []
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [messageInput, setMessageInput] = useState('');
+  const [showReminderModal, setShowReminderModal] = useState(false);
 
   // Scroll al final cuando se reciben nuevos mensajes
   useEffect(() => {
@@ -167,6 +171,13 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
               </p>
             )}
           </div>
+          <Button
+            onClick={() => setShowReminderModal(true)}
+            className="bg-yellow-400 hover:bg-yellow-500 text-black px-3 py-2 text-sm"
+            title="Programar recordatorio"
+          >
+            Recordar
+          </Button>
         </div>
       </div>
 
@@ -237,6 +248,14 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
           </Button>
         </form>
       </div>
+
+      <ReminderModal
+        open={showReminderModal}
+        onClose={() => setShowReminderModal(false)}
+        chatId={selectedChat?.id?._serialized ?? selectedChat?.id}
+        chats={chats}
+        hideRecipients={true}
+      />
     </div>
   );
 };
