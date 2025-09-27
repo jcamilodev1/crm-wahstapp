@@ -66,6 +66,23 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_chats_timestamp ON chats (timestamp);
   CREATE INDEX IF NOT EXISTS idx_contacts_name ON contacts (name);
 `);
+// Tabla para recordatorios: programar envíos a uno o varios chats
+db.exec(`
+  CREATE TABLE IF NOT EXISTS reminders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    body TEXT,
+    recipients TEXT, -- JSON array of chat ids
+    scheduledAt INTEGER, -- epoch ms
+    repeatRule TEXT, -- opcional, e.g. cron or human readable
+    status TEXT DEFAULT 'pending', -- pending | processing | sent | failed | cancelled
+    attempts INTEGER DEFAULT 0,
+    lastError TEXT,
+    sentAt INTEGER,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_reminders_status_scheduledAt ON reminders (status, scheduledAt);
+`);
 // Backwards-compatible migration: ensure media columns exist on older DBs
 try {
   const cols = db.prepare("PRAGMA table_info('messages')").all();
@@ -112,6 +129,47 @@ const deleteOldMessages = db.prepare(`
   )
 `);
 
+// Prepared statements para recordatorios
+const insertReminder = db.prepare(`
+  INSERT INTO reminders (body, recipients, scheduledAt, repeatRule, status)
+  VALUES (?, ?, ?, ?, ?)
+`);
+
+const getDueReminders = db.prepare(`
+  SELECT * FROM reminders
+  WHERE status = 'pending' AND scheduledAt <= ?
+  ORDER BY scheduledAt ASC
+  LIMIT ?
+`);
+
+const markReminderProcessing = db.prepare(`
+  UPDATE reminders SET status = 'processing', attempts = attempts + 1 WHERE id = ?
+`);
+
+const markReminderSent = db.prepare(`
+  UPDATE reminders SET status = 'sent', sentAt = ?, lastError = NULL WHERE id = ?
+`);
+
+const markReminderFailed = db.prepare(`
+  UPDATE reminders SET status = 'failed', lastError = ?, attempts = ? WHERE id = ?
+`);
+
+const rescheduleReminder = db.prepare(`
+  UPDATE reminders SET scheduledAt = ?, status = 'pending', lastError = NULL WHERE id = ?
+`);
+
+const listReminders = db.prepare(`
+  SELECT * FROM reminders ORDER BY scheduledAt DESC LIMIT ? OFFSET ?
+`);
+
+const getReminderById = db.prepare(`
+  SELECT * FROM reminders WHERE id = ?
+`);
+
+const deleteReminder = db.prepare(`
+  DELETE FROM reminders WHERE id = ?
+`);
+
 // Normalization helpers to ensure only allowed types are passed to better-sqlite3
 function normalizeValue(value) {
   if (value === undefined) return null;
@@ -154,7 +212,36 @@ module.exports = {
   getContacts,
   getChats,
   getMessages,
-  db
+  db,
+  // reminders
+  insertReminder: {
+    run: (...args) => insertReminder.run(...normalizeArray(args))
+  },
+  getDueReminders: {
+    all: (...args) => getDueReminders.all(...normalizeArray(args))
+  },
+  markReminderProcessing: {
+    run: (...args) => markReminderProcessing.run(...normalizeArray(args))
+  },
+  markReminderSent: {
+    run: (...args) => markReminderSent.run(...normalizeArray(args))
+  },
+  markReminderFailed: {
+    run: (...args) => markReminderFailed.run(...normalizeArray(args))
+  },
+  listReminders: {
+    all: (...args) => listReminders.all(...normalizeArray(args))
+  },
+  getReminderById: {
+    get: (...args) => getReminderById.get(...normalizeArray(args))
+  },
+  deleteReminder: {
+    run: (...args) => deleteReminder.run(...normalizeArray(args))
+  }
+  ,
+  rescheduleReminder: {
+    run: (...args) => rescheduleReminder.run(...normalizeArray(args))
+  }
 };
 
 // Backwards-compatible migration: ensure media columns exist on older DBs

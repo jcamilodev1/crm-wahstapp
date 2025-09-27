@@ -20,6 +20,8 @@
     "whatsapp-web.js": "^1.23.0"
     ,
     "mime-types": "^2.1.35"
+    ,
+    "cron-parser": "^3.11.0"
   },
   "devDependencies": {
     "@types/node": "^20",
