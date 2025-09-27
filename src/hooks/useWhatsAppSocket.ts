@@ -135,6 +135,11 @@ export const useWhatsAppSocket = () => {
 
     if (!chatId) return;
 
+    // Marcar mensajes como leídos después de un breve delay
+    setTimeout(() => {
+      markMessagesAsRead(chatId);
+    }, 1000);
+
     // Sincronizar el chat
     try {
       setSyncingChatId(chatId);
@@ -210,12 +215,22 @@ export const useWhatsAppSocket = () => {
     socketRef.current?.emit('mark_as_read', { chatId });
     
     // Actualizar el estado local inmediatamente
+    // Solo marcar como leídos los mensajes del chat actual que no son míos
     setMessages(prev => 
-      prev.map(msg => 
-        !msg.fromMe && msg.from.includes(chatId) 
-          ? { ...msg, isRead: true }
-          : msg
-      )
+      prev.map(msg => {
+        // Solo actualizar si no es mi mensaje y pertenece al chat actual
+        if (!msg.fromMe && msg.from) {
+          // Comparar si el mensaje pertenece al chat actual
+          const belongsToChat = msg.from.includes('@') ? 
+            msg.from === chatId || msg.from.includes(chatId.split('@')[0]) :
+            msg.from === chatId;
+          
+          if (belongsToChat) {
+            return { ...msg, isRead: true };
+          }
+        }
+        return msg;
+      })
     );
 
     // Actualizar el conteo de no leídos en el chat
