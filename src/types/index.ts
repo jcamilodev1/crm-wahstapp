@@ -28,6 +28,9 @@ export interface Message {
   mediaUrl?: string;
   mediaFilename?: string;
   mediaMime?: string;
+  // Estados de lectura
+  ack?: number; // 0: pendiente, 1: enviado, 2: entregado, 3: leído
+  isRead?: boolean; // Para mensajes recibidos
 }
 
 export interface SocketEvents {

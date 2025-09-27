@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState } from 'react';
 import Image from 'next/image';
 import { Chat, Message } from '../types';
 import { Avatar, Button, Input, Spinner } from './ui';
+import { MessageStatus } from './MessageStatus';
 import ReminderModal from './ReminderModal';
 
 interface MessageAreaProps {
@@ -13,6 +14,7 @@ interface MessageAreaProps {
   onLoadMoreMessages: () => void;
   syncError: string | null;
   chats?: any[];
+  onMarkAsRead?: (chatId: string) => void;
 }
 
 export const MessageArea: React.FC<MessageAreaProps> = ({
@@ -23,11 +25,23 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
   loadingMoreMessages,
   onLoadMoreMessages,
   syncError,
-  chats = []
+  chats = [],
+  onMarkAsRead
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const [messageInput, setMessageInput] = useState('');
   const [showReminderModal, setShowReminderModal] = useState(false);
+
+  // Marcar mensajes como leídos cuando se selecciona un chat
+  useEffect(() => {
+    if (selectedChat && onMarkAsRead) {
+      const timer = setTimeout(() => {
+        onMarkAsRead(selectedChat.id._serialized);
+      }, 1000); // Marcar como leído después de 1 segundo
+
+      return () => clearTimeout(timer);
+    }
+  }, [selectedChat, onMarkAsRead]);
 
   // Scroll al final cuando se reciben nuevos mensajes
   useEffect(() => {
@@ -200,11 +214,15 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
         ) : (
           messages.map((message) => (
             <div key={message.id} className={`flex ${message.fromMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
+              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
                 message.fromMe 
                   ? 'bg-blue-600 text-white' 
                   : 'bg-white text-gray-900 shadow-sm border'
-              }`}>
+              } ${!message.fromMe && message.isRead === false ? 'ring-2 ring-blue-200' : ''}`}>
+                {/* Indicador de mensaje no leído */}
+                {!message.fromMe && message.isRead === false && (
+                  <div className="absolute -left-2 top-2 w-2 h-2 bg-blue-500 rounded-full"></div>
+                )}
                 {!message.fromMe && (
                   <p className="text-xs opacity-75 mb-1">
                     {message.from}
@@ -217,11 +235,18 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                 
                 {renderMediaContent(message)}
                 
-                <p className={`text-xs mt-2 ${
+                <div className={`flex items-center justify-between mt-2 ${
                   message.fromMe ? 'text-blue-100' : 'text-gray-500'
                 }`}>
-                  {formatTimestamp(message.timestamp)}
-                </p>
+                  <p className="text-xs">
+                    {formatTimestamp(message.timestamp)}
+                  </p>
+                  <MessageStatus 
+                    ack={message.ack} 
+                    fromMe={message.fromMe}
+                    className={message.fromMe ? 'text-blue-100' : 'text-gray-500'}
+                  />
+                </div>
               </div>
             </div>
           ))

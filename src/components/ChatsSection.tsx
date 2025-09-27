@@ -18,7 +18,8 @@ export const ChatsSection: React.FC = () => {
     handleChatClick,
     handleSendMessage,
     loadMoreChats,
-    loadMoreMessages
+    loadMoreMessages,
+    markMessagesAsRead
   } = useWhatsAppSocket();
 
   return (
@@ -42,6 +43,7 @@ export const ChatsSection: React.FC = () => {
         onLoadMoreMessages={loadMoreMessages}
         syncError={syncError}
         chats={chats}
+        onMarkAsRead={markMessagesAsRead}
       />
     </div>
   );

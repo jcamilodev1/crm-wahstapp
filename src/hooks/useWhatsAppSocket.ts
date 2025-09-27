@@ -205,6 +205,29 @@ export const useWhatsAppSocket = () => {
     });
   };
 
+  // Marcar mensajes como leídos
+  const markMessagesAsRead = (chatId: string) => {
+    socketRef.current?.emit('mark_as_read', { chatId });
+    
+    // Actualizar el estado local inmediatamente
+    setMessages(prev => 
+      prev.map(msg => 
+        !msg.fromMe && msg.from.includes(chatId) 
+          ? { ...msg, isRead: true }
+          : msg
+      )
+    );
+
+    // Actualizar el conteo de no leídos en el chat
+    setChats(prev =>
+      prev.map(chat =>
+        chat.id._serialized === chatId
+          ? { ...chat, unreadCount: 0 }
+          : chat
+      )
+    );
+  };
+
   return {
     socket: socketRef.current,
     qr,
@@ -225,6 +248,7 @@ export const useWhatsAppSocket = () => {
     handleChatClick,
     handleSendMessage,
     loadMoreChats,
-    loadMoreMessages
+    loadMoreMessages,
+    markMessagesAsRead
   };
 };
