@@ -1,13 +1,12 @@
 "use client";
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
+import { io } from 'socket.io-client';
 import ReminderModal from '../components/ReminderModal';
-import { QRConnection, MainSidebar, ChatsSection, RecordatoriosSection } from '../components';
+import { QRConnection } from '../components';
 import { useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
 
 export default function Home() {
-  const [qr, setQr] = useState<string | null>(null);
-  const [ready, setReady] = useState(false);
   const [chats, setChats] = useState<any[]>([]);
   const [selectedChat, setSelectedChat] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -17,13 +16,12 @@ export default function Home() {
   const [showReminderModal, setShowReminderModal] = useState(false);
   const [showReminderModalHideRecipients, setShowReminderModalHideRecipients] = useState(false);
 
+  const { qr, ready } = useWhatsAppSocket();
+
   useEffect(() => {
     const socket = io('http://localhost:3001', { transports: ['polling', 'websocket'] });
     socketRef.current = socket;
-    socket.on('qr', (url: string) => setQr(url));
     socket.on('ready', () => {
-      setReady(true);
-      setQr(null);
       socket.emit('get_chats', { page: 1, limit: 50 });
     });
     socket.on('chats', (payload: any) => { setChats(Array.isArray(payload.chats) ? payload.chats : []); });
@@ -44,15 +42,6 @@ export default function Home() {
     socketRef.current?.emit('send_message', { chatId: selectedChat.id?._serialized ?? selectedChat.id, message: messageInput.trim() });
     setMessageInput('');
   };
-
-  if (qr) return (
-    <div className="flex flex-col items-center justify-center min-h-screen">
-      <h1 className="text-2xl mb-4">Escanea el código QR con WhatsApp</h1>
-      <img src={qr} alt="QR Code" />
-    </div>
-  );
-  const [activeSection, setActiveSection] = useState('chats');
-  const { qr, ready } = useWhatsAppSocket();
 
   if (qr) {
     return <QRConnection qr={qr} />;
