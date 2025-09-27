@@ -22,7 +22,7 @@ export const ChatsSection: React.FC = () => {
   } = useWhatsAppSocket();
 
   return (
-    <div className="flex h-screen">
+    <div className="flex flex-1 h-screen">
       <ChatSidebar
         contacts={contacts}
         chats={chats}
