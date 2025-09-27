@@ -31,7 +31,7 @@ export const MainSidebar: React.FC<MainSidebarProps> = ({
   onSectionChange
 }) => {
   return (
-    <div className="w-16 bg-gray-900 flex flex-col h-screen">
+    <div className="w-24 bg-gray-900 flex flex-col h-screen">
       {/* Logo/Brand */}
       <div className="p-4 flex justify-center border-b border-gray-700">
         <div className="w-8 h-8 bg-green-500 rounded-lg flex items-center justify-center">
