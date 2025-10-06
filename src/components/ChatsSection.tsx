@@ -3,7 +3,7 @@ import { ChatSidebar } from "./ChatSidebar";
 import { MessageArea } from "./MessageArea";
 import { ContactForm } from "./ContactForm";
 import { useWhatsAppSocket } from "../hooks/useWhatsAppSocket";
-import { Contact } from "../types";
+import { Contact, Chat } from "../types";
 
 export const ChatsSection: React.FC = () => {
   const {
@@ -67,8 +67,8 @@ export const ChatsSection: React.FC = () => {
 
   const handleEditContact = (chat: Chat) => {
     // Convertir el chat a un contacto para edición
-    const contactToEdit = {
-      id: chat.id._serialized || chat.id,
+    const contactToEdit: Contact = {
+      id: chat.id._serialized || String(chat.id),
       name: chat.name || "",
       number: chat.id.user || "",
       avatar: chat.avatar,

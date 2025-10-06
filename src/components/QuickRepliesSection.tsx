@@ -2,7 +2,6 @@ import React, { useState } from "react";
 
 export const QuickRepliesSection: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("todas");
   const [activeTab, setActiveTab] = useState("todas");
 
   // Respuestas rápidas organizadas por categorías

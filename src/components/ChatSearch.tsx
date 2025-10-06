@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Chat, Contact } from "../types";
 import { getChatDisplayName } from "../utils/chatUtils";
 
@@ -25,43 +25,88 @@ export const ChatSearch: React.FC<ChatSearchProps> = ({
   const [isSearching, setIsSearching] = useState(false);
 
   // Función para buscar chats y contactos
-  const searchChatsAndContacts = (query: string) => {
-    if (!query.trim()) {
-      onClearSearch();
-      return;
-    }
+  const searchChatsAndContacts = useCallback(
+    (query: string) => {
+      if (!query.trim()) {
+        onClearSearch();
+        return;
+      }
 
-    setIsSearching(true);
+      setIsSearching(true);
 
-    const searchTerm = query.toLowerCase();
-    const results: SearchResult[] = [];
+      const searchTerm = query.toLowerCase();
+      const results: SearchResult[] = [];
 
-    // Contactos de prueba para desarrollo
-    const testContacts = [
-      {
-        id: "test1",
-        name: "Juan Pérez",
-        number: "+573001234567",
-        avatar: undefined,
-      },
-      {
-        id: "test2",
-        name: "María García",
-        number: "+573007654321",
-        avatar: undefined,
-      },
-      {
-        id: "test3",
-        name: "Carlos López",
-        number: "+573009876543",
-        avatar: undefined,
-      },
-    ];
+      // Contactos de prueba para desarrollo
+      const testContacts = [
+        {
+          id: "test1",
+          name: "Juan Pérez",
+          number: "+573001234567",
+          avatar: undefined,
+        },
+        {
+          id: "test2",
+          name: "María García",
+          number: "+573007654321",
+          avatar: undefined,
+        },
+        {
+          id: "test3",
+          name: "Carlos López",
+          number: "+573009876543",
+          avatar: undefined,
+        },
+      ];
 
-    // Agregar contactos de prueba si la búsqueda coincide
-    testContacts.forEach((contact) => {
-      const contactName = contact.name.toLowerCase();
-      if (contactName.includes(searchTerm)) {
+      // Agregar contactos de prueba si la búsqueda coincide
+      testContacts.forEach((contact) => {
+        const contactName = contact.name.toLowerCase();
+        if (contactName.includes(searchTerm)) {
+          results.push({
+            id: { _serialized: contact.id },
+            name: contact.name,
+            avatar: contact.avatar,
+            type: "contact",
+            contactData: contact,
+          } as SearchResult);
+        }
+      });
+
+      // Buscar en chats
+      const filteredChats = chats.filter((chat) => {
+        const chatName = getChatDisplayName(chat, contacts);
+        const lastMessage = chat.lastMessage || "";
+
+        return (
+          chatName.toLowerCase().includes(searchTerm) ||
+          lastMessage.toLowerCase().includes(searchTerm)
+        );
+      });
+
+      // Agregar chats a resultados
+      filteredChats.forEach((chat) => {
+        results.push({
+          ...chat,
+          type: "chat",
+        });
+      });
+
+      // Buscar en contactos que no tienen chat
+      const filteredContacts = contacts.filter((contact) => {
+        const contactName = contact.name || contact.number;
+        const hasExistingChat = chats.some((chat) => {
+          const chatName = getChatDisplayName(chat, contacts);
+          return chatName.toLowerCase() === contactName.toLowerCase();
+        });
+
+        return (
+          !hasExistingChat && contactName.toLowerCase().includes(searchTerm)
+        );
+      });
+
+      // Agregar contactos a resultados (crear un objeto tipo Chat para compatibilidad)
+      filteredContacts.forEach((contact) => {
         results.push({
           id: { _serialized: contact.id },
           name: contact.name,
@@ -69,53 +114,13 @@ export const ChatSearch: React.FC<ChatSearchProps> = ({
           type: "contact",
           contactData: contact,
         } as SearchResult);
-      }
-    });
-
-    // Buscar en chats
-    const filteredChats = chats.filter((chat) => {
-      const chatName = getChatDisplayName(chat, contacts);
-      const lastMessage = chat.lastMessage || "";
-
-      return (
-        chatName.toLowerCase().includes(searchTerm) ||
-        lastMessage.toLowerCase().includes(searchTerm)
-      );
-    });
-
-    // Agregar chats a resultados
-    filteredChats.forEach((chat) => {
-      results.push({
-        ...chat,
-        type: "chat",
-      });
-    });
-
-    // Buscar en contactos que no tienen chat
-    const filteredContacts = contacts.filter((contact) => {
-      const contactName = contact.name || contact.number;
-      const hasExistingChat = chats.some((chat) => {
-        const chatName = getChatDisplayName(chat, contacts);
-        return chatName.toLowerCase() === contactName.toLowerCase();
       });
 
-      return !hasExistingChat && contactName.toLowerCase().includes(searchTerm);
-    });
-
-    // Agregar contactos a resultados (crear un objeto tipo Chat para compatibilidad)
-    filteredContacts.forEach((contact) => {
-      results.push({
-        id: { _serialized: contact.id },
-        name: contact.name,
-        avatar: contact.avatar,
-        type: "contact",
-        contactData: contact,
-      } as SearchResult);
-    });
-
-    onSearchResults(results);
-    setIsSearching(false);
-  };
+      onSearchResults(results);
+      setIsSearching(false);
+    },
+    [chats, contacts, onSearchResults, onClearSearch]
+  );
 
   // Debounce para evitar búsquedas excesivas
   useEffect(() => {
@@ -124,7 +129,7 @@ export const ChatSearch: React.FC<ChatSearchProps> = ({
     }, 300);
 
     return () => clearTimeout(timeoutId);
-  }, [searchQuery, chats, contacts]);
+  }, [searchQuery, chats, contacts, searchChatsAndContacts]);
 
   const handleClearSearch = () => {
     setSearchQuery("");
