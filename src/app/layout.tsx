@@ -2,8 +2,13 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "WhatsApp CRM",
-  description: "CRM for WhatsApp",
+  title: "TolkToc - Tu negocio en tus manos",
+  description: "CRM para WhatsApp",
+  icons: {
+    icon: "/favicon.webp",
+    shortcut: "/favicon.webp",
+    apple: "/favicon.webp",
+  },
 };
 
 export default function RootLayout({
@@ -12,8 +17,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body suppressHydrationWarning>{children}</body>
+    <html lang="en" className="h-full">
+      <body suppressHydrationWarning className="h-full bg-gray-50">
+        {children}
+      </body>
     </html>
   );
 }

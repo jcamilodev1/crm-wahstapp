@@ -11,6 +11,8 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
+    "cron-parser": "^5.4.0",
+    "mime-types": "^2.1.35",
     "next": "14.2.3",
     "qrcode": "^1.5.3",
     "react": "^18",
@@ -18,10 +20,6 @@
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5",
     "whatsapp-web.js": "^1.23.0"
-    ,
-    "mime-types": "^2.1.35"
-    ,
-    "cron-parser": "^3.11.0"
   },
   "devDependencies": {
     "@types/node": "^20",
