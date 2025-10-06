@@ -3,6 +3,7 @@ export interface Contact {
   name?: string;
   number: string;
   avatar?: string;
+  tag?: string;
 }
 
 export interface Chat {
@@ -38,7 +39,11 @@ export interface SocketEvents {
   ready: () => void;
   contacts: (contacts: Contact[]) => void;
   chats: (data: { chats: Chat[]; page: number; limit: number }) => void;
-  messages: (data: { messages: Message[]; page: number; limit: number }) => void;
+  messages: (data: {
+    messages: Message[];
+    page: number;
+    limit: number;
+  }) => void;
   new_message: (data: { chatId: string; message: Message }) => void;
   connect_error: (error: any) => void;
   connect_timeout: (error: any) => void;

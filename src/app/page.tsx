@@ -1,11 +1,17 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import { QRConnection, MainSidebar, ChatsSection, RecordatoriosSection } from '../components';
-import { useWhatsAppSocket } from '../hooks/useWhatsAppSocket';
+import { useState } from "react";
+import {
+  QRConnection,
+  MainSidebar,
+  ChatsSection,
+  RecordatoriosSection,
+  QuickRepliesSection,
+} from "../components";
+import { useWhatsAppSocket } from "../hooks/useWhatsAppSocket";
 
 export default function Home() {
-  const [activeSection, setActiveSection] = useState('chats');
+  const [activeSection, setActiveSection] = useState("chats");
   const { qr, ready } = useWhatsAppSocket();
 
   if (qr) {
@@ -18,10 +24,12 @@ export default function Home() {
 
   const renderActiveSection = () => {
     switch (activeSection) {
-      case 'chats':
+      case "chats":
         return <ChatsSection />;
-      case 'recordatorios':
+      case "recordatorios":
         return <RecordatoriosSection />;
+      case "respuestas-rapidas":
+        return <QuickRepliesSection />;
       default:
         return <ChatsSection />;
     }
@@ -29,7 +37,7 @@ export default function Home() {
 
   return (
     <div className="flex h-screen bg-gray-50">
-      <MainSidebar 
+      <MainSidebar
         activeSection={activeSection}
         onSectionChange={setActiveSection}
       />

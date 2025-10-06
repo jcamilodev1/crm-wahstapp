@@ -1,11 +1,12 @@
-import React, { useRef, useEffect, useState } from 'react';
-import Image from 'next/image';
-import { Chat, Message } from '../types';
-import { Avatar, Button, Input, Spinner } from './ui';
-import { MessageStatus } from './MessageStatus';
-import { ReadStatusBadge } from './ReadStatusBadge';
-import { ChatReadStatus } from './ChatReadStatus';
-import ReminderModal from './ReminderModal';
+import React, { useRef, useEffect, useState } from "react";
+import Image from "next/image";
+import { Chat, Message } from "../types";
+import { Avatar, Button, Input, Spinner } from "./ui";
+import { MessageStatus } from "./MessageStatus";
+import { ReadStatusBadge } from "./ReadStatusBadge";
+import { ChatReadStatus } from "./ChatReadStatus";
+import { QuickRepliesFooter } from "./QuickRepliesFooter";
+import ReminderModal from "./ReminderModal";
 
 interface MessageAreaProps {
   selectedChat: Chat | null;
@@ -17,6 +18,8 @@ interface MessageAreaProps {
   syncError: string | null;
   chats?: any[];
   onMarkAsRead?: (chatId: string) => void;
+  onEditContact?: (chat: Chat) => void;
+  contacts?: any[];
 }
 
 export const MessageArea: React.FC<MessageAreaProps> = ({
@@ -28,10 +31,12 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
   onLoadMoreMessages,
   syncError,
   chats = [],
-  onMarkAsRead
+  onMarkAsRead,
+  onEditContact,
+  contacts = [],
 }) => {
   const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const [messageInput, setMessageInput] = useState('');
+  const [messageInput, setMessageInput] = useState("");
   const [showReminderModal, setShowReminderModal] = useState(false);
 
   // Marcar mensajes como leídos cuando se selecciona un chat
@@ -64,21 +69,64 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
       }
     };
 
-    container.addEventListener('scroll', handleScroll);
-    return () => container.removeEventListener('scroll', handleScroll);
+    container.addEventListener("scroll", handleScroll);
+    return () => container.removeEventListener("scroll", handleScroll);
   }, [hasMoreMessages, onLoadMoreMessages]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!messageInput.trim()) return;
-    
+
     onSendMessage(messageInput.trim());
-    setMessageInput('');
+    setMessageInput("");
   };
 
   const formatTimestamp = (timestamp: number) => {
     const date = new Date(timestamp * 1000);
-    return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  };
+
+  // Función para obtener la etiqueta del contacto
+  const getContactTag = (chat: Chat) => {
+    // Por ahora, simulamos etiquetas para los contactos mock
+    const mockTags: { [key: string]: string } = {
+      "test-contact": "Cliente",
+      test1: "Proveedor",
+      test2: "Empleado",
+      test3: "Familia",
+    };
+
+    // Etiquetas mock para algunos chats existentes (para demostración)
+    const chatNameTags: { [key: string]: string } = {
+      "DEV SENIOR CODE LLC": "Proveedor",
+      "Juan Camilo Dev": "Empleado",
+      "Alejandro Dev": "Empleado",
+      "Emanuel Web": "Empleado",
+      "Alicia Magis TV pro": "Cliente",
+      Revendedores: "Cliente",
+      Amor: "Familia",
+    };
+
+    // Buscar en contactos reales si existe
+    const contact = contacts.find(
+      (c) =>
+        c.id === chat.id._serialized ||
+        c.number === chat.id.user ||
+        c.name === chat.name
+    );
+
+    if (contact && contact.tag) {
+      return contact.tag;
+    }
+
+    // Retornar etiqueta por nombre del chat
+    const chatName = chat.name || chat.id.user;
+    if (chatName && chatNameTags[chatName]) {
+      return chatNameTags[chatName];
+    }
+
+    // Retornar etiqueta mock o por defecto
+    return mockTags[chat.id._serialized] || "Sin etiqueta";
   };
 
   const renderMediaContent = (message: Message) => {
@@ -86,13 +134,13 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
 
     const { mediaMime, mediaUrl, mediaFilename } = message;
 
-    if (mediaMime?.startsWith('image/')) {
+    if (mediaMime?.startsWith("image/")) {
       return (
         <div className="mt-2 max-w-xs">
           <div className="relative rounded-lg overflow-hidden">
             <Image
               src={mediaUrl}
-              alt={mediaFilename || 'Imagen'}
+              alt={mediaFilename || "Imagen"}
               width={300}
               height={200}
               className="object-cover"
@@ -103,7 +151,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
       );
     }
 
-    if (mediaMime?.startsWith('audio/')) {
+    if (mediaMime?.startsWith("audio/")) {
       return (
         <div className="mt-2">
           <audio controls className="max-w-xs">
@@ -115,7 +163,7 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
       );
     }
 
-    if (mediaMime?.startsWith('video/')) {
+    if (mediaMime?.startsWith("video/")) {
       return (
         <div className="mt-2 max-w-xs">
           <video controls className="rounded-lg max-h-64 w-full">
@@ -136,11 +184,21 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
           rel="noopener noreferrer"
           className="inline-flex items-center space-x-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
         >
-          <svg className="w-4 h-4 text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+          <svg
+            className="w-4 h-4 text-gray-600"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
+            />
           </svg>
           <span className="text-sm text-gray-700">
-            {mediaFilename || 'Descargar archivo'}
+            {mediaFilename || "Descargar archivo"}
           </span>
         </a>
       </div>
@@ -152,8 +210,18 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
       <div className="flex-1 flex items-center justify-center bg-gray-50 ">
         <div className="text-center">
           <div className="mx-auto w-24 h-24 bg-gray-200 rounded-full flex items-center justify-center mb-4">
-            <svg className="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+            <svg
+              className="w-12 h-12 text-gray-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"
+              />
             </svg>
           </div>
           <h3 className="text-lg font-medium text-gray-900 mb-2">
@@ -178,52 +246,115 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
             size="md"
           />
           <div className="flex-1">
-            <h2 className="text-lg font-semibold text-gray-900">
-              {selectedChat.name || selectedChat.id.user}
-            </h2>
             <div className="flex items-center space-x-3">
+              <h2 className="text-lg font-semibold text-gray-900">
+                {selectedChat.name || selectedChat.id.user}
+              </h2>
+              {/* Badge de etiqueta */}
+              <span
+                className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  getContactTag(selectedChat) === "Sin etiqueta"
+                    ? "bg-gray-100 text-gray-600"
+                    : "bg-blue-100 text-blue-800"
+                }`}
+              >
+                {getContactTag(selectedChat)}
+              </span>
+            </div>
+            <div className="flex items-center space-x-3 mt-1">
               <ChatReadStatus unreadCount={selectedChat.unreadCount} />
               {syncError && (
-                <p className="text-sm text-red-600">
-                  Error: {syncError}
-                </p>
+                <p className="text-sm text-red-600">Error: {syncError}</p>
               )}
             </div>
           </div>
-          <Button
-            onClick={() => setShowReminderModal(true)}
-            className="bg-yellow-400 hover:bg-yellow-500 text-black px-3 py-2 text-sm"
-            title="Programar recordatorio"
-          >
-            Recordar
-          </Button>
+          <div className="flex items-center space-x-2">
+            {/* Botón de editar contacto */}
+            {onEditContact && selectedChat && (
+              <button
+                onClick={() => onEditContact(selectedChat)}
+                className="p-2 text-gray-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                title="Editar contacto"
+              >
+                <svg
+                  className="w-4 h-4"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                  />
+                </svg>
+              </button>
+            )}
+
+            {/* Botón de recordatorio con icono de reloj */}
+            <button
+              onClick={() => setShowReminderModal(true)}
+              className="p-2 text-gray-500 hover:text-yellow-600 hover:bg-yellow-50 rounded-lg transition-colors"
+              title="Programar recordatorio"
+            >
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Área de mensajes */}
-      <div 
+      <div
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50"
       >
         {loadingMoreMessages && (
           <div className="text-center py-2">
             <Spinner size="sm" className="mx-auto" />
-            <p className="text-sm text-gray-500 mt-2">Cargando mensajes anteriores...</p>
+            <p className="text-sm text-gray-500 mt-2">
+              Cargando mensajes anteriores...
+            </p>
           </div>
         )}
 
         {messages.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-gray-500">No hay mensajes en esta conversación</p>
+            <p className="text-gray-500">
+              No hay mensajes en esta conversación
+            </p>
           </div>
         ) : (
           messages.map((message) => (
-            <div key={message.id} className={`flex ${message.fromMe ? 'justify-end' : 'justify-start'}`}>
-              <div className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
-                message.fromMe 
-                  ? 'bg-blue-600 text-white' 
-                  : 'bg-white text-gray-900 shadow-sm border'
-              } ${!message.fromMe && message.isRead === false ? 'ring-2 ring-blue-200' : ''}`}>
+            <div
+              key={message.id}
+              className={`flex ${
+                message.fromMe ? "justify-end" : "justify-start"
+              }`}
+            >
+              <div
+                className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg relative ${
+                  message.fromMe
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-900 shadow-sm border"
+                } ${
+                  !message.fromMe && message.isRead === false
+                    ? "ring-2 ring-blue-200"
+                    : ""
+                }`}
+              >
                 {/* Indicador de mensaje no leído */}
                 {!message.fromMe && message.isRead === false && (
                   <div className="absolute -left-3 top-2">
@@ -232,36 +363,36 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
                   </div>
                 )}
                 {!message.fromMe && (
-                  <p className="text-xs opacity-75 mb-1">
-                    {message.from}
-                  </p>
+                  <p className="text-xs opacity-75 mb-1">{message.from}</p>
                 )}
-                
-                {message.body && (
-                  <p className="break-words">{message.body}</p>
-                )}
-                
+
+                {message.body && <p className="break-words">{message.body}</p>}
+
                 {renderMediaContent(message)}
-                
+
                 {/* Badge de estado de lectura */}
                 <div className="mt-2">
-                  <ReadStatusBadge 
-                    ack={message.ack} 
+                  <ReadStatusBadge
+                    ack={message.ack}
                     fromMe={message.fromMe}
                     isRead={message.isRead}
                   />
                 </div>
-                
-                <div className={`flex items-center justify-between mt-2 ${
-                  message.fromMe ? 'text-blue-100' : 'text-gray-500'
-                }`}>
+
+                <div
+                  className={`flex items-center justify-between mt-2 ${
+                    message.fromMe ? "text-blue-100" : "text-gray-500"
+                  }`}
+                >
                   <p className="text-xs">
                     {formatTimestamp(message.timestamp)}
                   </p>
-                  <MessageStatus 
-                    ack={message.ack} 
+                  <MessageStatus
+                    ack={message.ack}
                     fromMe={message.fromMe}
-                    className={message.fromMe ? 'text-blue-100' : 'text-gray-500'}
+                    className={
+                      message.fromMe ? "text-blue-100" : "text-gray-500"
+                    }
                   />
                 </div>
               </div>
@@ -279,17 +410,30 @@ export const MessageArea: React.FC<MessageAreaProps> = ({
             placeholder="Escribe un mensaje..."
             className="flex-1"
           />
-          <Button 
-            type="submit" 
+          <Button
+            type="submit"
             disabled={!messageInput.trim()}
             className="px-6"
           >
-            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+            <svg
+              className="w-4 h-4"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"
+              />
             </svg>
           </Button>
         </form>
       </div>
+
+      {/* Respuestas rápidas */}
+      <QuickRepliesFooter onSendMessage={onSendMessage} />
 
       <ReminderModal
         open={showReminderModal}
