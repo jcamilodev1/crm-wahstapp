@@ -118,7 +118,7 @@ export const useWhatsAppSocket = () => {
           }
           return chat;
         });
-        return updated;
+        return updated.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
       });
 
       // Si el chat está seleccionado, agregar el mensaje

@@ -175,6 +175,19 @@ function setupSocketHandlers(io) {
         );
         // Limpiar mensajes antiguos
         deleteOldMessages.run(chatId, chatId);
+        // Emitir el mensaje enviado como new_message para actualizar la UI
+        const emitMsg = {
+          id:
+            sentMessage.id && (sentMessage.id._serialized || sentMessage.id.id)
+              ? sentMessage.id._serialized || sentMessage.id.id
+              : null,
+          body: sentMessage.body,
+          from: sentMessage.from,
+          timestamp: sentMessage.timestamp,
+          type: sentMessage.type,
+          hasMedia: !!sentMessage.hasMedia,
+        };
+        io.emit("new_message", { chatId, message: emitMsg });
         socket.emit("message_sent", { chatId, message });
       } catch (error) {
         socket.emit("error", error.message);
