@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import io, { Socket } from "socket.io-client";
 import { Chat, Contact, Message } from "../types";
 
@@ -23,27 +23,30 @@ export const useWhatsAppSocket = () => {
   const isFetchingChatsRef = useRef(false);
   const isFetchingMessagesRef = useRef(false);
 
+  const loadContacts = useCallback(() => {
+    socketRef.current?.emit("get_contacts");
+  }, []);
+
+  const loadChats = useCallback((page = 1, limit = 10) => {
+    socketRef.current?.emit("get_chats", { page, limit });
+  }, []);
+
   // Sincronizar selectedChatRef con selectedChat
   useEffect(() => {
     selectedChatRef.current = selectedChat;
   }, [selectedChat]);
 
-  // Configurar socket
   useEffect(() => {
-    const socket = io("http://localhost:3001", {
-      transports: ["polling", "websocket"],
-      timeout: 20000,
-      reconnectionAttempts: 5,
-    });
-
+    const socket = io("http://localhost:3001");
     socketRef.current = socket;
 
-    socket.on("qr", setQr);
+    socket.on("qr", (qrData: string | null) => {
+      console.log("Received qr event:", qrData);
+      setQr(qrData);
+    });
     socket.on("ready", () => {
+      console.log("Received ready event");
       setReady(true);
-      setQr(null);
-      socket.emit("get_contacts");
-      socket.emit("get_chats", { page: 1, limit: 10 });
     });
     socket.on("contacts", setContacts);
 
@@ -52,11 +55,19 @@ export const useWhatsAppSocket = () => {
       const chunk: Chat[] = Array.isArray(data.chats) ? data.chats : [];
 
       if (page <= 1) {
-        setChats(chunk);
+        // Filtrar duplicados por id._serialized
+        const uniqueChunk = chunk.filter((chat, index, self) =>
+          index === self.findIndex(c => c.id?._serialized === chat.id?._serialized)
+        );
+        setChats(uniqueChunk);
       } else {
         setChats((prev) => {
-          const newChats = [...prev, ...chunk];
-          return newChats;
+          const combined = [...prev, ...chunk];
+          // Filtrar duplicados
+          const uniqueCombined = combined.filter((chat, index, self) =>
+            index === self.findIndex(c => c.id?._serialized === chat.id?._serialized)
+          );
+          return uniqueCombined;
         });
       }
       setHasMoreChats(chunk.length === 10);
@@ -273,5 +284,7 @@ export const useWhatsAppSocket = () => {
     loadMoreChats,
     loadMoreMessages,
     markMessagesAsRead,
+    loadContacts,
+    loadChats,
   };
-};
+}

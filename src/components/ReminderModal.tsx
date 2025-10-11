@@ -102,13 +102,13 @@ export default function ReminderModal({
       return;
     }
     if (!datetime && !repeat) {
-      setError("Selecciona una fecha/hora o una expresión recurrente (cron)");
-      return;
+      // Para testing, permitir sin fecha, se programa en 5 segundos
     }
 
     const scheduledAt = datetime
       ? new Date(datetime).getTime()
-      : Date.now() + 1000;
+      : Date.now() + 5000; // Para testing, programar en 5 segundos si no hay fecha
+    console.log('datetime:', datetime, 'scheduledAt:', scheduledAt, 'Date:', new Date(scheduledAt).toString());
     const payload: any = {
       body: body.trim(),
       recipients: recipientsPayload,
@@ -121,7 +121,7 @@ export default function ReminderModal({
       const apiKey = process.env.NEXT_PUBLIC_SYNC_API_KEY || "";
       const headers: any = { "Content-Type": "application/json" };
       if (apiKey) headers["x-api-key"] = apiKey;
-      const resp = await fetch("/api/reminders", {
+      const resp = await fetch("http://localhost:3001/api/reminders", {
         method: "POST",
         headers,
         body: JSON.stringify(payload),

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   QRConnection,
   MainSidebar,
@@ -12,7 +12,14 @@ import { useWhatsAppSocket } from "../hooks/useWhatsAppSocket";
 
 export default function Home() {
   const [activeSection, setActiveSection] = useState("chats");
-  const { qr, ready } = useWhatsAppSocket();
+  const { qr, ready, contacts, chats, loadContacts, loadChats } = useWhatsAppSocket();
+
+  useEffect(() => {
+    if (ready && activeSection === "chats" && chats.length === 0) {
+      loadChats();
+    }
+    // Si hay sección de contacts, agregar aquí
+  }, [ready, activeSection, chats.length, loadChats]);
 
   if (qr) {
     return <QRConnection qr={qr} />;

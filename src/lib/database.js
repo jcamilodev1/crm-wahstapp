@@ -11,7 +11,9 @@ if (!fs.existsSync(dataDir)) {
 }
 
 const dbPath = path.join(dataDir, 'whatsapp.db');
-const db = new Database(dbPath);
+// Add a timeout so that if the DB is briefly locked by another process,
+// better-sqlite3 will wait up to 5s before throwing SQLITE_BUSY.
+const db = new Database(dbPath, { timeout: 5000 });
 
 // Crear tablas
 db.exec(`

@@ -169,3 +169,10 @@ El hook `useWhatsAppSocket` encapsula toda la lógica de estado y comunicación,
 ## 📄 Licencia
 
 Este proyecto está bajo la Licencia MIT.
+
+
+export SYNC_API_KEY="mi_api_key"
+npm run whatsapp
+
+export SYNC_API_KEY="mi_api_key"
+npm run dev
