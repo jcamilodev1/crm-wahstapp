@@ -44,9 +44,9 @@ export const useWhatsAppSocket = () => {
       console.log("Received qr event:", qrData);
       setQr(qrData);
     });
-    socket.on("ready", () => {
-      console.log("Received ready event");
-      setReady(true);
+    socket.on("ready", (isReady: boolean) => {
+      console.log("Received ready event:", isReady);
+      setReady(isReady);
     });
     socket.on("contacts", setContacts);
 
@@ -130,6 +130,9 @@ export const useWhatsAppSocket = () => {
     socket.on("connect_error", (err: any) => {
       setSyncError(`Error de conexión: ${String(err)}`);
     });
+
+    // Cargar chats iniciales
+    socket.emit("get_chats", { page: 1, limit: 10 });
 
     return () => {
       socket.disconnect();

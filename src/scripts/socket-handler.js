@@ -19,9 +19,13 @@ function setupSocketHandlers(io) {
     if (qrState.lastQr) {
       socket.emit("qr", qrState.lastQr);
     }
-    if (readyState.isReady) {
-      socket.emit("ready");
-    }
+    socket.emit("ready", readyState.isReady);
+
+    // Emitir chats y contacts desde DB, incluso si no ready
+    const chats = getChats.all();
+    socket.emit("chats", chats.slice(0, 10));
+    const contacts = getContacts.all();
+    socket.emit("contacts", contacts.slice(0, 10));
 
   socket.on("get_contacts", async () => {
     try {
