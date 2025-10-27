@@ -3,8 +3,10 @@
 const fs = require("fs");
 const path = require("path");
 const mime = require("mime-types");
+const pLimit = require("p-limit");
 const {
   insertMessage,
+  insertUser,
   listReminders,
   getReminderById,
   deleteReminder,
@@ -13,8 +15,13 @@ const {
   markReminderSent,
   markReminderFailed,
   rescheduleReminder,
+  getUserByEmail,
+  getUserById,
 } = require("../lib/database");
 const { SYNC_API_KEY, MEDIA_ROOT, NODE_ENV } = require("./config");
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const JWT_SECRET = process.env.JWT_SECRET || 'please-change-this-secret';
 const { client, readyState, normalize, normalizeChatIdInput } = require("./whatsapp-client");
 
 function setupRoutes(server, io) {
@@ -27,6 +34,108 @@ function setupRoutes(server, io) {
 
   // Simple health endpoint to check server availability
   server.on("request", async (req, res) => {
+    // Helper to authenticate requests using Bearer JWT token
+    async function authenticateRequest(headers) {
+      try {
+        const auth = headers && (headers['authorization'] || headers['Authorization']);
+        if (!auth) return null;
+        const parts = String(auth).split(' ');
+        if (parts.length !== 2) return null;
+        const scheme = parts[0];
+        const token = parts[1];
+        if (!/^Bearer$/i.test(scheme)) return null;
+        const payload = jwt.verify(token, JWT_SECRET);
+        if (!payload || !payload.id) return null;
+        const user = getUserById.get(payload.id);
+        return user || null;
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // Simple auth endpoints: register & login
+    if (req.url && req.url.startsWith('/api/auth')) {
+      const corsHeaders = {
+        "Access-Control-Allow-Origin": "http://localhost:3000",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      };
+
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204, corsHeaders);
+        res.end();
+        return;
+      }
+
+      if (req.method === 'POST' && req.url === '/api/auth/register') {
+        try {
+          let body = '';
+          for await (const chunk of req) body += chunk;
+          const payload = body ? JSON.parse(body) : {};
+          const { email, password, name } = payload;
+          if (!email || !password) {
+            res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'email_and_password_required' }));
+            return;
+          }
+          const existing = getUserByEmail.get(String(email).toLowerCase());
+          if (existing) {
+            res.writeHead(409, { ...corsHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'user_exists' }));
+            return;
+          }
+          const saltRounds = 10;
+          const hash = bcrypt.hashSync(String(password), saltRounds);
+          insertUser.run(String(email).toLowerCase(), hash, name || null, 'user');
+          res.writeHead(201, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ ok: true }));
+          return;
+        } catch (e) {
+          res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'internal', details: e && e.message ? e.message : String(e) }));
+          return;
+        }
+      }
+
+      if (req.method === 'POST' && req.url === '/api/auth/login') {
+        try {
+          let body = '';
+          for await (const chunk of req) body += chunk;
+          const payload = body ? JSON.parse(body) : {};
+          const { email, password } = payload;
+          if (!email || !password) {
+            res.writeHead(400, { ...corsHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'email_and_password_required' }));
+            return;
+          }
+          const user = getUserByEmail.get(String(email).toLowerCase());
+          if (!user) {
+            res.writeHead(401, { ...corsHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_credentials' }));
+            return;
+          }
+          const ok = bcrypt.compareSync(String(password), user.passwordHash || '');
+          if (!ok) {
+            res.writeHead(401, { ...corsHeaders, 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'invalid_credentials' }));
+            return;
+          }
+          const token = jwt.sign({ id: user.id, email: user.email }, JWT_SECRET, { expiresIn: '7d' });
+          res.writeHead(200, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ token, user: { id: user.id, email: user.email, name: user.name } }));
+          return;
+        } catch (e) {
+          res.writeHead(500, { ...corsHeaders, 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'internal', details: e && e.message ? e.message : String(e) }));
+          return;
+        }
+      }
+
+      // If not matched
+      res.writeHead(404, { ...corsHeaders, 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'not_found' }));
+      return;
+    }
     if (req.method === "GET" && req.url === "/health") {
       res.writeHead(200, { ...corsBase, "Content-Type": "application/json" });
       res.end(JSON.stringify({ status: "ok" }));
@@ -84,26 +193,30 @@ function setupRoutes(server, io) {
       }
 
       try {
-        const apiKeyHeader =
-          req.headers["x-api-key"] || req.headers["authorization"];
+        // Try to authenticate using Bearer token first
+        const authenticatedUser = await authenticateRequest(req.headers);
+        const apiKeyHeader = req.headers["x-api-key"];
         const expected = SYNC_API_KEY;
 
-        if (!apiKeyHeader && NODE_ENV === "production") {
-          res.writeHead(401, {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          });
-          res.end(JSON.stringify({ error: "unauthorized" }));
-          return;
-        }
+        if (!authenticatedUser) {
+          // Fallback to API key for backward compatibility
+          if (!apiKeyHeader && NODE_ENV === "production") {
+            res.writeHead(401, {
+              ...corsHeaders,
+              "Content-Type": "application/json",
+            });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+          }
 
-        if (apiKeyHeader && String(apiKeyHeader) !== expected) {
-          res.writeHead(401, {
-            ...corsHeaders,
-            "Content-Type": "application/json",
-          });
-          res.end(JSON.stringify({ error: "unauthorized" }));
-          return;
+          if (apiKeyHeader && String(apiKeyHeader) !== expected) {
+            res.writeHead(401, {
+              ...corsHeaders,
+              "Content-Type": "application/json",
+            });
+            res.end(JSON.stringify({ error: "unauthorized" }));
+            return;
+          }
         }
 
         // collect body
@@ -161,87 +274,112 @@ function setupRoutes(server, io) {
             return;
           }
 
-          console.log(`Chat found, fetching messages with limit: ${limit}`);
-          const messages = await chat.fetchMessages({ limit });
-          console.log(`Fetched ${messages.length} messages from chat`);
-          let saved = 0;
-          for (const m of messages) {
-            try {
-              // If message has media, attempt to download and store
-              let mediaFilename = null;
-              let mediaMime = null;
-              let mediaSize = null;
-              if (m.hasMedia) {
-                try {
-                  const media = await m.downloadMedia();
-                  if (media && media.data) {
-                    mediaMime = media.mimetype || null;
-                    mediaSize = media.filesize || null;
-                    const ext = media.filename
-                      ? path.extname(media.filename)
-                      : mediaMime
-                      ? "." + mediaMime.split("/").pop()
-                      : "";
-                    const mediaDir = path.join(MEDIA_ROOT, chatId);
-                    fs.mkdirSync(mediaDir, { recursive: true });
-                    mediaFilename = `${
-                      m.id && (m.id._serialized || m.id.id)
-                        ? m.id._serialized || m.id.id
-                        : Date.now()
-                    }${ext}`;
-                    const filePath = path.join(mediaDir, mediaFilename);
-                    fs.writeFileSync(filePath, Buffer.from(media.data, "base64"));
-                  }
-                } catch (e) {
-                  console.warn(
-                    "Failed to download media during sync for message",
-                    m && m.id ? m.id._serialized || m.id.id : "<no-id>",
-                    e && e.message ? e.message : e
-                  );
-                }
-              }
+          console.log(`Chat found, starting background sync for chat ${chatId} with limit: ${limit}`);
 
-              insertMessage.run(
-                normalize(
-                  m && m.id && (m.id._serialized || m.id.id)
-                    ? m.id._serialized || m.id.id
-                    : null
-                ),
-                normalize(chatId),
-                normalize(
-                  m && m.body ? m.body : m && m.content ? m.content : null
-                ),
-                normalize(m && m.from ? m.from : null),
-                normalize(m && m.to ? m.to : null),
-                normalize(m && m.timestamp ? m.timestamp : null),
-                normalize(m && m.type ? m.type : null),
-                normalize(m && m.isForwarded),
-                normalize(m && m.isStatus),
-                normalize(m && m.isStarred),
-                normalize(m && m.fromMe),
-                normalize(m && m.hasMedia),
-                normalize(mediaFilename),
-                normalize(mediaMime),
-                normalize(mediaSize)
+          // Start background sync so the HTTP request returns quickly.
+          (async () => {
+            try {
+              io.emit("sync_started", { chatId });
+              const messages = await chat.fetchMessages({ limit });
+              console.log(`Fetched ${messages.length} messages from chat ${chatId}`);
+
+              // Concurrency limiter for media downloads during sync
+              const concurrency = Number(process.env.SYNC_MEDIA_CONCURRENCY || 2);
+              const limitFn = pLimit(concurrency);
+
+              let saved = 0;
+
+              const tasks = messages.map((m) =>
+                limitFn(async () => {
+                  try {
+                    // If message has media, attempt to download and store
+                    let mediaFilename = null;
+                    let mediaMime = null;
+                    let mediaSize = null;
+                    if (m.hasMedia) {
+                      try {
+                        const media = await m.downloadMedia();
+                        if (media && media.data) {
+                          mediaMime = media.mimetype || null;
+                          mediaSize = media.filesize || null;
+                          const ext = media.filename
+                            ? path.extname(media.filename)
+                            : mediaMime
+                            ? "." + mediaMime.split("/").pop()
+                            : "";
+                          const mediaDir = path.join(MEDIA_ROOT, chatId);
+                          fs.mkdirSync(mediaDir, { recursive: true });
+                          mediaFilename = `${
+                            m.id && (m.id._serialized || m.id.id)
+                              ? m.id._serialized || m.id.id
+                              : Date.now()
+                          }${ext}`;
+                          const filePath = path.join(mediaDir, mediaFilename);
+                          fs.writeFileSync(filePath, Buffer.from(media.data, "base64"));
+                        }
+                      } catch (e) {
+                        console.warn(
+                          "Failed to download media during sync for message",
+                          m && m.id ? m.id._serialized || m.id.id : "<no-id>",
+                          e && e.message ? e.message : e
+                        );
+                      }
+                    }
+
+                    insertMessage.run(
+                      normalize(
+                        m && m.id && (m.id._serialized || m.id.id)
+                          ? m.id._serialized || m.id.id
+                          : null
+                      ),
+                      normalize(chatId),
+                      normalize(
+                        m && m.body ? m.body : m && m.content ? m.content : null
+                      ),
+                      normalize(m && m.from ? m.from : null),
+                      normalize(m && m.to ? m.to : null),
+                      normalize(m && m.timestamp ? m.timestamp : null),
+                      normalize(m && m.type ? m.type : null),
+                      normalize(m && m.isForwarded),
+                      normalize(m && m.isStatus),
+                      normalize(m && m.isStarred),
+                      normalize(m && m.fromMe),
+                      normalize(m && m.hasMedia),
+                      normalize(mediaFilename),
+                      normalize(mediaMime),
+                      normalize(mediaSize)
+                    );
+                    saved++;
+                  } catch (err) {
+                    console.warn(
+                      "Failed to save message during sync:",
+                      err && err.message ? err.message : err
+                    );
+                  }
+                })
               );
-              saved++;
+
+              await Promise.all(tasks);
+
+              console.log(
+                `Sync completed: ${saved}/${messages.length} messages saved for chat ${chatId}`
+              );
+              io.emit("sync_completed", { chatId, saved, total: messages.length });
             } catch (err) {
-              console.warn(
-                "Failed to save message during sync:",
+              console.error(
+                "Error during background sync:",
                 err && err.message ? err.message : err
               );
+              io.emit("sync_failed", { chatId, error: err && err.message ? err.message : String(err) });
             }
-          }
+          })();
 
-          console.log(
-            `Sync completed: ${saved}/${messages.length} messages saved`
-          );
-          io.emit("sync_completed", { chatId, saved, total: messages.length });
-          res.writeHead(200, {
+          // Return immediately to HTTP client so it doesn't block
+          res.writeHead(202, {
             ...corsHeaders,
             "Content-Type": "application/json",
           });
-          res.end(JSON.stringify({ chatId, saved, total: messages.length }));
+          res.end(JSON.stringify({ status: "started", chatId, limit }));
           return;
         } catch (err) {
           console.error(
@@ -290,16 +428,18 @@ function setupRoutes(server, io) {
           let body = "";
           for await (const chunk of req) body += chunk;
           const payload = body ? JSON.parse(body) : {};
-          const apiKeyHeader =
-            req.headers["x-api-key"] || req.headers["authorization"];
+          const authenticatedUser = await authenticateRequest(req.headers);
+          const apiKeyHeader = req.headers["x-api-key"];
           const expected = SYNC_API_KEY;
-          if (!apiKeyHeader || String(apiKeyHeader) !== expected) {
-            res.writeHead(401, {
-              ...corsHeaders,
-              "Content-Type": "application/json",
-            });
-            res.end(JSON.stringify({ error: "unauthorized" }));
-            return;
+          if (!authenticatedUser) {
+            if (!apiKeyHeader || String(apiKeyHeader) !== expected) {
+              res.writeHead(401, {
+                ...corsHeaders,
+                "Content-Type": "application/json",
+              });
+              res.end(JSON.stringify({ error: "unauthorized" }));
+              return;
+            }
           }
 
           const { body: text, recipients, scheduledAt, repeatRule } = payload;

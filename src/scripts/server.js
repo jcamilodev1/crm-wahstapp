@@ -61,7 +61,9 @@ client.on("auth_failure", (msg) => {
 client.on("disconnected", (reason) => {
   console.log("Client disconnected:", reason);
   readyState.isReady = false;
+  // Emitir ready=false para que el frontend actualice su estado
   io.emit("disconnected", reason);
+  io.emit("ready", false);
 });
 
 client.on("ready", async () => {
@@ -69,7 +71,7 @@ client.on("ready", async () => {
   // Emitir "ready" inmediatamente para ocultar el QR y mostrar la UI
   readyState.isReady = true;
   qrState.lastQr = null; // Limpiar el último QR
-  io.emit("ready");
+  io.emit("ready", true);
   io.emit("qr", null); // Limpiar el QR para mostrar la UI principal
   console.log("Ready emitted immediately, qr cleared");
 

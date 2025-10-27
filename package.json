@@ -21,6 +21,11 @@
     "socket.io": "^4.7.5",
     "socket.io-client": "^4.7.5",
     "whatsapp-web.js": "^1.23.0"
+    ,
+    "p-limit": "^4.0.0"
+    ,
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.0"
   },
   "devDependencies": {
     "@types/node": "^20",

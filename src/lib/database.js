@@ -85,6 +85,19 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_reminders_status_scheduledAt ON reminders (status, scheduledAt);
 `);
+// Tabla para usuarios (autenticación)
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT UNIQUE,
+    passwordHash TEXT,
+    name TEXT,
+    role TEXT,
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_users_email ON users (email);
+`);
 // Backwards-compatible migration: ensure media columns exist on older DBs
 try {
   const cols = db.prepare("PRAGMA table_info('messages')").all();
@@ -116,6 +129,18 @@ const insertChat = db.prepare(`
 const insertMessage = db.prepare(`
   INSERT OR REPLACE INTO messages (id, chatId, body, sender, recipient, timestamp, type, isForwarded, isStatus, isStarred, fromMe, hasMedia, mediaFilename, mediaMime, mediaSize)
   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+`);
+
+const insertUser = db.prepare(`
+  INSERT INTO users (email, passwordHash, name, role) VALUES (?, ?, ?, ?)
+`);
+
+const getUserByEmail = db.prepare(`
+  SELECT * FROM users WHERE email = ? LIMIT 1
+`);
+
+const getUserById = db.prepare(`
+  SELECT * FROM users WHERE id = ? LIMIT 1
 `);
 
 const getContacts = db.prepare('SELECT * FROM contacts ORDER BY name');
@@ -243,6 +268,17 @@ module.exports = {
   ,
   rescheduleReminder: {
     run: (...args) => rescheduleReminder.run(...normalizeArray(args))
+  }
+  ,
+  // users
+  insertUser: {
+    run: (...args) => insertUser.run(...normalizeArray(args))
+  },
+  getUserByEmail: {
+    get: (...args) => getUserByEmail.get(...normalizeArray(args))
+  },
+  getUserById: {
+    get: (...args) => getUserById.get(...normalizeArray(args))
   }
 };
 

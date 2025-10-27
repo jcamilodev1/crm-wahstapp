@@ -10,9 +10,29 @@ const {
   deleteOldMessages,
 } = require("../lib/database");
 const { client, qrState, readyState, normalize } = require("./whatsapp-client");
+const jwt = require('jsonwebtoken');
+const { getUserById } = require('../lib/database');
+const JWT_SECRET = process.env.JWT_SECRET || 'please-change-this-secret';
 
 function setupSocketHandlers(io) {
   io.on("connection", (socket) => {
+    // Try to authenticate socket connection if token is provided in handshake
+    try {
+      const auth = socket.handshake && socket.handshake.auth && socket.handshake.auth.token;
+      if (auth) {
+        const payload = jwt.verify(auth, JWT_SECRET);
+        if (payload && payload.id) {
+          const user = getUserById.get(payload.id);
+          if (user) {
+            socket.user = { id: user.id, email: user.email, name: user.name };
+            console.log('Socket authenticated for user', user.email);
+          }
+        }
+      }
+    } catch (e) {
+      console.log('Socket auth failed (token invalid)');
+    }
+
     console.log("User connected");
 
     // Send current state to new client

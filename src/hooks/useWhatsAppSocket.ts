@@ -37,7 +37,9 @@ export const useWhatsAppSocket = () => {
   }, [selectedChat]);
 
   useEffect(() => {
-    const socket = io("http://localhost:3001");
+    // Read token from localStorage and pass it in the socket.io auth handshake
+    const token = typeof window !== 'undefined' ? localStorage.getItem('wa_token') : null;
+    const socket = io("http://localhost:3001", { auth: { token } });
     socketRef.current = socket;
 
     socket.on("qr", (qrData: string | null) => {
@@ -104,26 +106,68 @@ export const useWhatsAppSocket = () => {
 
       // Actualizar lista de chats
       setChats((prev) => {
+        const incomingTs = Number(incomingMsg && incomingMsg.timestamp) || Date.now();
+        let found = false;
         const updated = prev.map((chat) => {
           const chatId = chat?.id?._serialized ?? chat?.id;
           if (chatId === incomingChatId) {
+            found = true;
             const isSelected =
               selectedChatRef.current?.id?._serialized === incomingChatId;
             return {
               ...chat,
-              timestamp: incomingMsg.timestamp,
+              timestamp: incomingTs,
               lastMessage: incomingMsg.body || "",
               unreadCount: isSelected ? 0 : (chat.unreadCount || 0) + 1,
             };
           }
           return chat;
         });
-        return updated.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+
+        // If chat was not in the list (new chat), prepend a minimal entry
+        if (!found) {
+          const newChat: any = {
+            id: { _serialized: incomingChatId },
+            name: incomingChatId,
+            timestamp: incomingTs,
+            lastMessage: incomingMsg.body || "",
+            unreadCount: 1,
+          };
+          updated.unshift(newChat);
+        }
+
+        // Sort by timestamp desc
+        return updated.sort((a, b) => (Number(b.timestamp) || 0) - (Number(a.timestamp) || 0));
       });
 
       // Si el chat está seleccionado, agregar el mensaje
       if (selectedChatRef.current?.id?._serialized === incomingChatId) {
         setMessages((prev) => [...prev, incomingMsg]);
+      }
+    });
+
+    // Cuando el servidor termina la sincronización en background, solicitar los mensajes actualizados
+    socket.on("sync_completed", (data: any) => {
+      try {
+        const chatId = data && data.chatId;
+        if (chatId) {
+          console.log("Sync completed for", chatId, "- fetching messages");
+          socketRef.current?.emit("get_messages", { chatId, page: 1, limit: 20 });
+        }
+      } catch (e) {
+        /* ignore */
+      }
+    });
+    socket.on("sync_failed", (data: any) => {
+      try {
+        const chatId = data && data.chatId;
+        const error = data && data.error;
+        console.warn("Sync failed for", chatId, error);
+        setSyncError(error || "sync_failed");
+        // clear syncing indicator if it matches
+        setSyncingChatId((current) => (current === chatId ? null : current));
+      } catch (e) {
+        /* ignore */
       }
     });
 
@@ -174,11 +218,20 @@ export const useWhatsAppSocket = () => {
 
       if (!resp.ok) {
         setSyncError(`Error de sincronización: ${resp.status}`);
+        setSyncingChatId(null);
+      } else {
+        // Si el servidor inició la sync en background (202), esperar al evento 'sync_completed' para recargar mensajes
+        if (resp.status === 202) {
+          console.log("Sync started in background for", chatId);
+          // mantener syncing indicator hasta que llegue 'sync_completed'
+        } else {
+          // Respuesta sincrónica (200) -> obtener mensajes inmediatamente
+          socketRef.current?.emit("get_messages", { chatId, page: 1, limit: 20 });
+          setSyncingChatId(null);
+        }
       }
     } catch (err: any) {
       setSyncError(`Error de sincronización: ${err.message}`);
-    } finally {
-      socketRef.current?.emit("get_messages", { chatId, page: 1, limit: 20 });
       setSyncingChatId(null);
     }
   };
